@@ -26,7 +26,13 @@ PAT to let Argo CD read the repo and the Kind node pull the image:
 
 1. Create a fine-grained PAT scoped to this repo: **Contents: Read-only**,
    plus **read:packages** for GHCR.
-2. Export it (never commit it, never put it in a `.tfvars` file):
+2. `cp .env.local.example .env.local` and fill in the two values.
+   `.env.local` is gitignored and `scripts/bootstrap.sh` sources it
+   automatically. It's also denied to Claude (see `.claude/settings.json`)
+   so the token never ends up in a conversation transcript.
+
+   Alternatively, just export the two vars in your shell instead of using
+   `.env.local`:
 
    ```bash
    export TF_VAR_github_username=<your-github-username>

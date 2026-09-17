@@ -21,6 +21,9 @@ apps/**/bin/
 apps/**/*.test
 apps/**/coverage.out
 
+# Local secrets -- see .env.local.example
+.env.local
+
 # OS / editor
 .DS_Store
 .vscode/

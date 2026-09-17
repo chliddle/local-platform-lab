@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env.local)",
+      "Grep(./.env.local)",
+      "Bash(cat .env.local)",
+      "Bash(cat ./.env.local)"
+    ]
+  }
+}

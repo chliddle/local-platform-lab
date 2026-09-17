@@ -6,6 +6,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_dir="${repo_root}/terraform/environments/dev"
 
+# shellcheck disable=SC1091
+if [ -f "${repo_root}/.env.local" ]; then
+  set -a
+  source "${repo_root}/.env.local"
+  set +a
+fi
+
 echo "==> Checking prerequisites"
 
 if ! docker info >/dev/null 2>&1; then
@@ -30,7 +37,11 @@ These seed two Kubernetes secrets (never committed to Git):
     hello-world image
 
 Create a fine-grained GitHub PAT with "Contents: Read-only" on this repo
-and "read:packages" scope, then:
+and "read:packages" scope, then either:
+
+  cp .env.local.example .env.local   # fill in the values, bootstrap.sh sources it
+
+or:
 
   export TF_VAR_github_username=<your-github-username>
   export TF_VAR_github_token=<the-pat>
