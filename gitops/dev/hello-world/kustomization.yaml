@@ -4,16 +4,17 @@ kind: Kustomization
 namespace: hello-world
 
 resources:
-  - ../../../apps/hello-world/k8s/base
+- ../../../apps/hello-world/k8s/base
 
 patches:
-  - path: patch-environment.yaml
-    target:
-      kind: Deployment
-      name: hello-world
+- path: patch-environment.yaml
+  target:
+    kind: Deployment
+    name: hello-world
 
 # Placeholder digest -- CI overwrites this with the real one via
 # `kustomize edit set image` after building and pushing to GHCR.
 images:
-  - name: ghcr.io/chliddle/hello-world
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+- digest: sha256:ae69ee9099406dfaa63a0976858cfc9e1773e53232cf6ca64d07549ccfc52ef6
+  name: ghcr.io/chliddle/hello-world
+  newName: ghcr.io/chliddle/hello-world
