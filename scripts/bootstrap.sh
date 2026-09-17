@@ -27,31 +27,25 @@ for cmd in kind kubectl helm terraform; do
   fi
 done
 
-if [ -z "${TF_VAR_github_username:-}" ] || [ -z "${TF_VAR_github_token:-}" ] || [ -z "${TF_VAR_ghcr_token:-}" ]; then
+if [ -z "${TF_VAR_github_username:-}" ] || [ -z "${TF_VAR_github_token:-}" ]; then
   cat >&2 <<'EOF'
-error: TF_VAR_github_username, TF_VAR_github_token, and TF_VAR_ghcr_token must be set.
+error: TF_VAR_github_username and TF_VAR_github_token must be set.
 
 These seed two Kubernetes secrets (never committed to Git):
   - an Argo CD repo-credentials secret, so it can read this private repo
   - a GHCR imagePullSecret, so the Kind node can pull the private
     hello-world image
 
-Two separate tokens are needed -- fine-grained PATs have no "Packages"
-permission at all, so GHCR auth only works with a classic PAT:
-
-  TF_VAR_github_token: fine-grained PAT, scoped to this repo only,
-    "Contents: Read-only"
-  TF_VAR_ghcr_token: classic PAT, scope "read:packages" only
-
-Then either:
+Create a classic GitHub PAT (not fine-grained -- fine-grained PATs have no
+"Packages" permission at all, so GHCR auth requires classic) with scopes
+repo + read:packages, then either:
 
   cp .env.local.example .env.local   # fill in the values, bootstrap.sh sources it
 
 or:
 
   export TF_VAR_github_username=<your-github-username>
-  export TF_VAR_github_token=<the-fine-grained-pat>
-  export TF_VAR_ghcr_token=<the-classic-pat>
+  export TF_VAR_github_token=<the-pat>
 EOF
   exit 1
 fi
