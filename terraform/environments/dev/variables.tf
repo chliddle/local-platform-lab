@@ -12,7 +12,7 @@ variable "argocd_chart_version" {
 variable "github_repo_url" {
   type        = string
   description = "HTTPS URL of this repo, used as the Argo CD GitOps source"
-  default     = "https://github.com/chliddle/local-platform.git"
+  default     = "https://github.com/chliddle/local-platform-lab.git"
 }
 
 variable "github_username" {

@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chliddle/local-platform.git
+    repoURL: https://github.com/chliddle/local-platform-lab.git
     targetRevision: main
     path: gitops/dev/apps
   destination:
