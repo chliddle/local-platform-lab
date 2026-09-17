@@ -1,0 +1,40 @@
+# Minimal argo/argo-cd chart values for a local, single-node Kind cluster.
+# Insecure server (plain HTTP behind kubectl port-forward) avoids needing a
+# local TLS cert for the UI in Milestone 1 -- cert-manager arrives in M3 and
+# will front real applications, not the Argo CD control plane itself.
+configs:
+  params:
+    server.insecure: true
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+applicationSet:
+  enabled: false
+
+notifications:
+  enabled: false
+
+dex:
+  enabled: false

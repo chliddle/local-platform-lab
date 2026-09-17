@@ -1,0 +1,27 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.auto.tfvars
+*.auto.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Generated kind config / isolated kubeconfigs (reproducible from terraform apply)
+terraform/modules/kind-cluster/generated/
+terraform/environments/*/kubeconfig-*
+
+# Go
+apps/**/bin/
+apps/**/*.test
+apps/**/coverage.out
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

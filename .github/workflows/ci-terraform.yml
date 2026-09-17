@@ -1,0 +1,41 @@
+name: terraform CI
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+
+# No terraform apply here, on purpose: GitHub-hosted runners have no network
+# path to a Kind cluster running on a developer's laptop, so cluster
+# bootstrap can only ever happen locally via `make bootstrap`. CI validates
+# syntax and formatting only.
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - terraform/modules/kind-cluster
+          - terraform/environments/dev
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        working-directory: ${{ matrix.module }}
+        run: terraform fmt -check -recursive
+
+      - name: terraform init
+        working-directory: ${{ matrix.module }}
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        working-directory: ${{ matrix.module }}
+        run: terraform validate
