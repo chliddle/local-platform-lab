@@ -16,6 +16,6 @@ patches:
 # promotes the exact digest already validated in gitops/dev/hello-world
 # (never rebuilds) whenever semantic-release cuts a new version.
 images:
-- digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+- digest: sha256:3ed496e9d794cdf418901e49410f33f710c287b43b2a91485db9ff376a0b87c6
   name: ghcr.io/chliddle/hello-world
   newName: ghcr.io/chliddle/hello-world
