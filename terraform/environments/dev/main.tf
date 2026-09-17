@@ -64,8 +64,8 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
       auths = {
         "ghcr.io" = {
           username = var.github_username
-          password = var.github_token
-          auth     = base64encode("${var.github_username}:${var.github_token}")
+          password = var.ghcr_token
+          auth     = base64encode("${var.github_username}:${var.ghcr_token}")
         }
       }
     })

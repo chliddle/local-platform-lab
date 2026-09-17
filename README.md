@@ -21,22 +21,26 @@ publishing to GHCR, and Argo CD deploying it via GitOps.
 
 ## Secrets
 
-This repo and its GHCR packages are **private**. Bootstrap needs a GitHub
-PAT to let Argo CD read the repo and the Kind node pull the image:
+This repo and its GHCR packages are **private**. Bootstrap needs two GitHub
+PATs -- fine-grained PATs have no "Packages" permission at all, so GHCR
+auth only works with a classic PAT, hence two tokens rather than one:
 
-1. Create a fine-grained PAT scoped to this repo: **Contents: Read-only**,
-   plus **read:packages** for GHCR.
-2. `cp .env.local.example .env.local` and fill in the two values.
+1. **Fine-grained PAT**, scoped to this repo only: **Contents: Read-only**.
+   Lets Argo CD read the private GitOps repo.
+2. **Classic PAT**, scope **read:packages** only. Lets the Kind node pull
+   the private hello-world image.
+3. `cp .env.local.example .env.local` and fill in all three values.
    `.env.local` is gitignored and `scripts/bootstrap.sh` sources it
    automatically. It's also denied to Claude (see `.claude/settings.json`)
-   so the token never ends up in a conversation transcript.
+   so neither token ends up in a conversation transcript.
 
-   Alternatively, just export the two vars in your shell instead of using
+   Alternatively, just export the vars in your shell instead of using
    `.env.local`:
 
    ```bash
    export TF_VAR_github_username=<your-github-username>
-   export TF_VAR_github_token=<the-pat>
+   export TF_VAR_github_token=<the-fine-grained-pat>
+   export TF_VAR_ghcr_token=<the-classic-pat>
    ```
 
 CI itself doesn't need this PAT -- it uses the default `GITHUB_TOKEN` for
