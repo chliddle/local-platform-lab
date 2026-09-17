@@ -1,8 +1,12 @@
 module "kind" {
   source = "../../modules/kind-cluster"
 
-  cluster_name           = var.cluster_name
-  kubeconfig_output_path = "${path.module}/kubeconfig-${var.cluster_name}"
+  cluster_name = var.cluster_name
+  # abspath() so the kubeconfig_path output is safe to use from any working
+  # directory (e.g. scripts/bootstrap.sh, invoked from the repo root) --
+  # a bare "${path.module}/..." is only valid relative to this module's own
+  # directory.
+  kubeconfig_output_path = "${abspath(path.module)}/kubeconfig-${var.cluster_name}"
 }
 
 resource "kubernetes_namespace_v1" "argocd" {
@@ -89,6 +93,9 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 resource "terraform_data" "argocd_root_app" {
   triggers_replace = [
     filesha256("${path.module}/../../../platform/argocd/root-app.yaml"),
+    # Re-apply if the cluster itself was recreated -- this resource has no
+    # real remote object Terraform can refresh/detect drift on otherwise.
+    module.kind.instance_id,
   ]
 
   provisioner "local-exec" {

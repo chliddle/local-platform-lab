@@ -46,6 +46,11 @@ spec:
               memory: 128Mi
           securityContext:
             runAsNonRoot: true
+            # distroless's nonroot USER is a symbolic name, not numeric --
+            # kubelet can't verify runAsNonRoot against it without an
+            # explicit numeric UID here. 65532 is distroless's well-known
+            # nonroot UID.
+            runAsUser: 65532
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
