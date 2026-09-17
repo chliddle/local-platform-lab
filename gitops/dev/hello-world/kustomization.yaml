@@ -15,6 +15,6 @@ patches:
 # Placeholder digest -- CI overwrites this with the real one via
 # `kustomize edit set image` after building and pushing to GHCR.
 images:
-- digest: sha256:152db90d15e30a327189bb48d62b18db73f7d082314de2cd2f91f73d0180fcc9
+- digest: sha256:b6eae06c3753e20ac40b4cc34e8290458f349c89f41daa49aabdf4def8b06c79
   name: ghcr.io/chliddle/hello-world
   newName: ghcr.io/chliddle/hello-world
