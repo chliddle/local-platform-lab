@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
-# Recreates the entire dev environment: Kind cluster, Argo CD, and the
-# app-of-apps root Application. Idempotent -- safe to re-run.
+# Recreates a whole environment: Kind cluster, Argo CD, and the app-of-apps
+# root Application. Idempotent -- safe to re-run.
+#
+# Usage: scripts/bootstrap.sh [dev|prod]   (default: dev)
 set -euo pipefail
 
+env_name="${1:-dev}"
+case "$env_name" in
+  dev | prod) ;;
+  *)
+    echo "error: unknown environment '${env_name}' (expected dev or prod)" >&2
+    exit 1
+    ;;
+esac
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-env_dir="${repo_root}/terraform/environments/dev"
+env_dir="${repo_root}/terraform/environments/${env_name}"
 
 # shellcheck disable=SC1091
 if [ -f "${repo_root}/.env.local" ]; then
@@ -13,7 +24,7 @@ if [ -f "${repo_root}/.env.local" ]; then
   set +a
 fi
 
-echo "==> Checking prerequisites"
+echo "==> Checking prerequisites (${env_name})"
 
 if ! docker info >/dev/null 2>&1; then
   echo "error: Docker daemon is not running. Start Docker Desktop and re-run." >&2
@@ -62,7 +73,7 @@ KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status 
 
 cat <<EOF
 
-==> Bootstrap complete.
+==> Bootstrap complete (${env_name}).
 
 Use this cluster:
   export KUBECONFIG=${kubeconfig_path}

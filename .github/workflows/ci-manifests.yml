@@ -27,6 +27,9 @@ jobs:
       - name: kustomize build (dev overlay)
         run: kustomize build gitops/dev/hello-world > /dev/null
 
+      - name: kustomize build (prod overlay)
+        run: kustomize build gitops/prod/hello-world > /dev/null
+
       # No live cluster is available in CI, so kubectl can't discover the
       # Argo CD Application CRD to do a real dry-run. Sanity-check these as
       # plain YAML instead: parses cleanly and has the fields Argo CD

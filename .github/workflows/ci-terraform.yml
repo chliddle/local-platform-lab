@@ -21,6 +21,7 @@ jobs:
         module:
           - terraform/modules/kind-cluster
           - terraform/environments/dev
+          - terraform/environments/prod
     steps:
       - uses: actions/checkout@v7
 

@@ -1,0 +1,97 @@
+name: release
+
+# Explicit, structural dependency on the upstream lint/test/build/push
+# pipeline actually succeeding -- not an inference from which paths this
+# workflow happens to touch. workflow_run also fires for PR runs of
+# "hello-world CI", so the job condition below additionally restricts to
+# push events on main.
+on:
+  workflow_run:
+    workflows: ["hello-world CI"]
+    types: [completed]
+
+# Never cancel an in-flight release/promotion; queue instead, so
+# overlapping releases can't race each other into gitops/prod.
+concurrency:
+  group: production-promotion
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/hello-world
+
+jobs:
+  release:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      # Pin to the exact commit whose CI run triggered this, not whatever
+      # main's HEAD happens to be by the time this job starts.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0 # semantic-release needs full history to analyze conventional commits
+
+      - run: pip install --quiet pyyaml
+
+      - name: Read the digest already validated in dev
+        id: dev-digest
+        run: |
+          digest=$(python3 .github/scripts/read_image_digest.py gitops/dev/hello-world/kustomization.yaml "${{ env.IMAGE }}")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - uses: cycjimmy/semantic-release-action@v6
+        id: semantic
+        with:
+          semantic_version: 25.0.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.semantic.outputs.new_release_published == 'true'
+
+      - name: Log in to GHCR
+        if: steps.semantic.outputs.new_release_published == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags the exact digest already built and validated in dev with the
+      # new semver -- never rebuilds, per CLAUDE.md's promotion model.
+      - name: Tag GHCR image with release version
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.IMAGE }}:${{ steps.semantic.outputs.new_release_version }}" \
+            "${{ env.IMAGE }}@${{ steps.dev-digest.outputs.digest }}"
+
+      - name: Install kustomize
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s 5.4.2
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      - name: Promote the same digest to prod
+        if: steps.semantic.outputs.new_release_published == 'true'
+        working-directory: gitops/prod/hello-world
+        run: kustomize edit set image "${{ env.IMAGE }}=${{ env.IMAGE }}@${{ steps.dev-digest.outputs.digest }}"
+
+      - name: Commit and push
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gitops/prod/hello-world/kustomization.yaml
+          git commit -m "chore(gitops): promote hello-world@${{ steps.dev-digest.outputs.digest }} (${{ steps.semantic.outputs.new_release_version }}) to prod"
+          git push origin main

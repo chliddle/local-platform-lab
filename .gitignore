@@ -21,6 +21,9 @@ apps/**/bin/
 apps/**/*.test
 apps/**/coverage.out
 
+# Node (semantic-release tooling)
+node_modules/
+
 # Local secrets -- see .env.local.example
 .env.local
 

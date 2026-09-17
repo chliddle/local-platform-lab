@@ -1,0 +1,41 @@
+# Minimal argo/argo-cd chart values for a local, single-node Kind cluster.
+# Same shape as values-dev.yaml today -- both clusters run on the same
+# laptop, so there's no real "prod-grade sizing" difference yet. Kept as a
+# separate file (not shared) because that will stop being true once
+# Gateway API/TLS (M3) and real resource tuning apply per-environment.
+configs:
+  params:
+    server.insecure: true
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+applicationSet:
+  enabled: false
+
+notifications:
+  enabled: false
+
+dex:
+  enabled: false
