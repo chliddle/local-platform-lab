@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/chliddle/local-platform/apps/hello-world/internal/buildinfo"
@@ -27,5 +28,7 @@ func Root(w http.ResponseWriter, r *http.Request) {
 	info := buildinfo.Current()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, rootTemplate, info.Name, info.Name, info.Version, info.GitCommitSHA, info.Environment, info.Hostname)
+	if _, err := fmt.Fprintf(w, rootTemplate, info.Name, info.Name, info.Version, info.GitCommitSHA, info.Environment, info.Hostname); err != nil {
+		log.Printf("writing / response: %v", err)
+	}
 }

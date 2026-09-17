@@ -30,11 +30,15 @@ jobs:
       contents: write
       packages: write
     steps:
-      # Pin to the exact commit whose CI run triggered this, not whatever
-      # main's HEAD happens to be by the time this job starts.
+      # Deliberately checks out current main, not the pinned commit that
+      # triggered this run: by the time "hello-world CI" finishes (which is
+      # what triggers this), its own update-gitops job has usually already
+      # pushed a follow-up commit onto main. semantic-release refuses to
+      # release from a commit it considers "behind" the remote HEAD, so
+      # pinning here was actively counterproductive -- found by watching a
+      # real run fail with exactly that message.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0 # semantic-release needs full history to analyze conventional commits
 
       - run: pip install --quiet pyyaml
