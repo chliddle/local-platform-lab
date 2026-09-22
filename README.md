@@ -127,3 +127,7 @@ gitops/dev/, gitops/prod/ Argo CD Application manifests -- one per onboarded app
 scripts/                  Bootstrap automation
 .github/workflows/        Terraform validate, GitOps manifest validate
 ```
+
+## License
+
+[MIT](LICENSE)
