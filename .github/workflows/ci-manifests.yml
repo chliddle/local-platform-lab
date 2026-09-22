@@ -14,6 +14,10 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Least privilege, explicit rather than relying on the repo/org default
+    # GITHUB_TOKEN setting: this job only reads and validates, never writes.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

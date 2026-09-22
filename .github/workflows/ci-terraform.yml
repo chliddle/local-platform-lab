@@ -16,6 +16,10 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Least privilege, explicit rather than relying on the repo/org default
+    # GITHUB_TOKEN setting: this job only reads and validates, never writes.
+    permissions:
+      contents: read
     strategy:
       matrix:
         module:
