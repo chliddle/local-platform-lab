@@ -34,7 +34,13 @@ jobs:
 
       - name: Install kustomize
         run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s 5.4.2
+          # install_kustomize.sh calls the unauthenticated GitHub releases
+          # API to resolve the download URL -- shares the runner IP's 60/hr
+          # rate limit with everything else hitting api.github.com, and was
+          # observed failing here ("Github rate-limiter failed the
+          # request"). Downloading the pinned release asset directly
+          # bypasses the API entirely.
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.2/kustomize_v5.4.2_linux_amd64.tar.gz" | tar xz
           sudo mv kustomize /usr/local/bin/kustomize
 
       - run: pip install --quiet pyyaml
