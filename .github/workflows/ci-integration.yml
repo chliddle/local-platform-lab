@@ -18,6 +18,7 @@ on:
       - "terraform/**"
       - "platform/**"
       - "gitops/**"
+  workflow_dispatch: {}
 
 jobs:
   integration-test:
