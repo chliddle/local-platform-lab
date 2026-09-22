@@ -9,9 +9,28 @@ module "kind" {
   kubeconfig_output_path = "${abspath(path.module)}/kubeconfig-${var.cluster_name}"
 }
 
+# replace_triggered_by only accepts resources in the same module, not
+# module outputs -- this is a same-module stand-in for module.kind's
+# instance_id so every cluster-dependent resource below can reference it.
+resource "terraform_data" "cluster_instance" {
+  input = module.kind.instance_id
+  triggers_replace = [
+    module.kind.instance_id,
+  ]
+}
+
 resource "kubernetes_namespace_v1" "argocd" {
   metadata {
     name = "argocd"
+  }
+
+  # Recreate if the kind cluster is recreated. Namespaces/secrets/helm
+  # releases have no attribute referencing the cluster that would
+  # otherwise change, so a same-apply cluster replacement would silently
+  # orphan them (found by hitting exactly this after the repo's directory
+  # move changed the resolved kubeconfig path).
+  lifecycle {
+    replace_triggered_by = [terraform_data.cluster_instance]
   }
 }
 
@@ -23,6 +42,10 @@ resource "helm_release" "argocd" {
   version    = var.argocd_chart_version
 
   values = [file("${path.module}/../../../platform/argocd/values-dev.yaml")]
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.cluster_instance]
+  }
 }
 
 # A credential TEMPLATE (secret-type: repo-creds), not a single-repo
@@ -50,11 +73,19 @@ resource "kubernetes_secret_v1" "argocd_repo_creds" {
   }
 
   depends_on = [helm_release.argocd]
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.cluster_instance]
+  }
 }
 
 resource "kubernetes_namespace_v1" "hello_world" {
   metadata {
     name = "hello-world"
+  }
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.cluster_instance]
   }
 }
 
@@ -78,6 +109,10 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
         }
       }
     })
+  }
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.cluster_instance]
   }
 }
 
