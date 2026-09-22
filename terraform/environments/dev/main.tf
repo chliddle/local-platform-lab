@@ -9,28 +9,24 @@ module "kind" {
   kubeconfig_output_path = "${abspath(path.module)}/kubeconfig-${var.cluster_name}"
 }
 
-# replace_triggered_by only accepts resources in the same module, not
-# module outputs -- this is a same-module stand-in for module.kind's
-# instance_id so every cluster-dependent resource below can reference it.
-resource "terraform_data" "cluster_instance" {
-  input = module.kind.instance_id
-  triggers_replace = [
-    module.kind.instance_id,
-  ]
-}
-
+# KNOWN LIMITATION: if module.kind.terraform_data.kind_cluster is ever
+# replaced (e.g. its kubeconfig_output_path trigger changes, as happened
+# when this repo's directory moved), the kubernetes_namespace_v1/
+# helm_release/kubernetes_secret_v1 resources below have no attribute that
+# changes as a result, so nothing tells Terraform they need recreating too
+# -- the first apply after such a change fails partway through ("namespace
+# not found") with the cluster recreated but its contents orphaned in
+# state. A `lifecycle.replace_triggered_by` fix was tried and reverted: it
+# creates a genuine dependency cycle (destroying these resources needs the
+# kubernetes/helm provider, which is configured from the same cluster
+# resource being destroyed as part of the same replacement) --
+# `terraform apply` errors with "Cycle: ..." rather than actually fixing
+# anything. Recovery is simply re-running `terraform apply` (or
+# `make bootstrap`) a second time: Terraform's refresh step correctly
+# detects the orphaned resources as drift and recreates them.
 resource "kubernetes_namespace_v1" "argocd" {
   metadata {
     name = "argocd"
-  }
-
-  # Recreate if the kind cluster is recreated. Namespaces/secrets/helm
-  # releases have no attribute referencing the cluster that would
-  # otherwise change, so a same-apply cluster replacement would silently
-  # orphan them (found by hitting exactly this after the repo's directory
-  # move changed the resolved kubeconfig path).
-  lifecycle {
-    replace_triggered_by = [terraform_data.cluster_instance]
   }
 }
 
@@ -42,10 +38,6 @@ resource "helm_release" "argocd" {
   version    = var.argocd_chart_version
 
   values = [file("${path.module}/../../../platform/argocd/values-dev.yaml")]
-
-  lifecycle {
-    replace_triggered_by = [terraform_data.cluster_instance]
-  }
 }
 
 # A credential TEMPLATE (secret-type: repo-creds), not a single-repo
@@ -73,19 +65,11 @@ resource "kubernetes_secret_v1" "argocd_repo_creds" {
   }
 
   depends_on = [helm_release.argocd]
-
-  lifecycle {
-    replace_triggered_by = [terraform_data.cluster_instance]
-  }
 }
 
 resource "kubernetes_namespace_v1" "hello_world" {
   metadata {
     name = "hello-world"
-  }
-
-  lifecycle {
-    replace_triggered_by = [terraform_data.cluster_instance]
   }
 }
 
@@ -110,10 +94,6 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
       }
     })
   }
-
-  lifecycle {
-    replace_triggered_by = [terraform_data.cluster_instance]
-  }
 }
 
 # The single app-of-apps root Application. This is the only application
@@ -130,6 +110,11 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 # fresh apply) break the single-`terraform apply` bootstrap on a brand new
 # cluster. `kubectl apply` sidesteps both: no plan-time schema check, and
 # the kubeconfig path is just a string argument evaluated at apply time.
+#
+# This resource's own triggers_replace (below) works fine for cascading a
+# cluster replacement -- unlike the typed Kubernetes resources above, a
+# terraform_data local-exec destroy is just a shell command, not a
+# provider-graph dependency, so it doesn't hit the cycle described above.
 resource "terraform_data" "argocd_root_app" {
   triggers_replace = [
     filesha256("${path.module}/../../../platform/argocd/root-app.yaml"),
