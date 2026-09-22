@@ -11,8 +11,11 @@ via GitOps in both environments -- plus a **self-service, multi-repo
 platform model**: this repo owns clusters and cluster-facing GitOps
 plumbing only. Application code, CI, semantic versioning, and deploy
 manifests live in each app team's own repo (e.g.
-[local-platform-lab-app-1](https://github.com/chliddle/local-platform-lab-app-1)).
-Onboarding a new app never requires touching this repo's Terraform.
+[template-test-1](https://github.com/chliddle/template-test-1), generated
+from the
+[local-platform-lab-app-template](https://github.com/chliddle/local-platform-lab-app-template)
+template repo). Onboarding a new app never requires touching this repo's
+Terraform.
 
 ## Prerequisites
 
@@ -61,7 +64,7 @@ make bootstrap-prod                            # prod cluster
 
 kubectl config use-context kind-local-platform-dev
 kubectl get nodes
-kubectl -n argocd get application hello-world
+kubectl -n argocd get application template-test-1
 ```
 
 Both are idempotent -- re-running reconciles any drift instead of failing.
@@ -93,13 +96,20 @@ under this GitHub account, present or future.
 So onboarding a new self-service app repo is exactly one change here: add
 an `Application` manifest under `gitops/dev/apps/` and `gitops/prod/apps/`
 pointing at that repo's own deploy overlays (see
-[gitops/dev/apps/hello-world.yaml](gitops/dev/apps/hello-world.yaml) for
-the pattern). No Terraform changes, no new secret, no coordination with
-the platform team beyond that one file. The app team's repo owns
+[gitops/dev/apps/template-test-1.yaml](gitops/dev/apps/template-test-1.yaml)
+for the pattern). No Terraform changes, no new secret, no coordination
+with the platform team beyond that one file. The app team's repo owns
 everything else -- its own CI, its own semantic-release, its own
-dev-to-prod promotion -- entirely independently. See
-[local-platform-lab-app-1](https://github.com/chliddle/local-platform-lab-app-1)
-for what an app repo looks like, including its own release pipeline.
+dev-to-prod promotion -- entirely independently.
+
+New app teams start from
+[local-platform-lab-app-template](https://github.com/chliddle/local-platform-lab-app-template)
+(click "Use this template" on GitHub) -- a one-time `template-init`
+workflow renames everything (Go module path, app/Kubernetes-object name,
+container image) to match the new repo automatically, so nothing but the
+one `Application` manifest above ever needs manual configuration. See
+[template-test-1](https://github.com/chliddle/template-test-1) for what a
+generated app repo looks like, including its own release pipeline.
 
 ## Repository layout
 

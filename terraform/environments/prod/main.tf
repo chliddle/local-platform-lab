@@ -42,7 +42,7 @@ resource "helm_release" "argocd" {
 
 # A credential TEMPLATE (secret-type: repo-creds), not a single-repo
 # secret -- matched by URL PREFIX, so it covers this platform repo AND any
-# self-service app-team repo onboarded later (e.g. local-platform-lab-app-1)
+# self-service app-team repo onboarded later (e.g. template-test-1)
 # with zero further Terraform changes. This is what makes app onboarding
 # genuinely self-service: adding a new app is "commit an Application
 # manifest to gitops/*/apps/", never "touch Terraform". All repos are
@@ -69,12 +69,14 @@ resource "kubernetes_secret_v1" "argocd_repo_creds" {
 
 resource "kubernetes_namespace_v1" "hello_world" {
   metadata {
-    name = "hello-world"
+    name = "template-test-1"
   }
 }
 
-# Lets the Kind node pull the private ghcr.io/chliddle/hello-world image.
-# Referenced by name from apps/hello-world/k8s/base/deployment.yaml.
+# Lets the Kind node pull the private ghcr.io/chliddle/template-test-1
+# image. Referenced by name from deploy/base/deployment.yaml in that app's
+# own repo (chliddle/template-test-1) -- our example/test app generated
+# from the local-platform-lab-app-template template repo.
 resource "kubernetes_secret_v1" "ghcr_pull" {
   metadata {
     name      = "ghcr-pull-secret"
@@ -98,7 +100,7 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 
 # The single app-of-apps root Application. This is the only application
 # workload object Terraform ever touches directly -- everything under
-# gitops/prod/apps/ (and the hello-world Deployment/Service it points to) is
+# gitops/prod/apps/ (and the template-test-1 Deployment/Service it points to) is
 # reconciled by Argo CD from Git, never applied by Terraform or CI directly.
 #
 # Applied via the kubectl CLI (like the kind cluster itself) rather than a

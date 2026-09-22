@@ -1,17 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: hello-world
+  name: template-test-1
   namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/chliddle/local-platform-lab-app-1.git
+    repoURL: https://github.com/chliddle/template-test-1.git
     targetRevision: main
     path: deploy/overlays/dev
   destination:
     server: https://kubernetes.default.svc
-    namespace: hello-world
+    namespace: template-test-1
   syncPolicy:
     automated:
       prune: true

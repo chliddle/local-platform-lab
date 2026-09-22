@@ -655,7 +655,8 @@ change, never write access to the platform repo for the app team.
 └── CLAUDE.md
 ```
 
-## App repos (one per self-service app, e.g. `local-platform-lab-app-1`)
+## App repos (one per self-service app, generated from the
+`local-platform-lab-app-template` template repo -- e.g. `template-test-1`)
 
 ```
 .

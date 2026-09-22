@@ -45,7 +45,7 @@ error: TF_VAR_github_username and TF_VAR_github_token must be set.
 These seed two Kubernetes secrets (never committed to Git):
   - an Argo CD repo-credentials secret, so it can read this private repo
   - a GHCR imagePullSecret, so the Kind node can pull the private
-    hello-world image
+    template-test-1 image
 
 Create a classic GitHub PAT (not fine-grained -- fine-grained PATs have no
 "Packages" permission at all, so GHCR auth requires classic) with scopes
@@ -92,6 +92,6 @@ Argo CD UI (admin password below, then browse https://localhost:8080):
   kubectl -n ${argocd_namespace} port-forward svc/argocd-server 8080:443 &
   kubectl -n ${argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 
-Check the hello-world app synced:
-  kubectl -n ${argocd_namespace} get application hello-world -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
+Check the template-test-1 app synced:
+  kubectl -n ${argocd_namespace} get application template-test-1 -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
 EOF
