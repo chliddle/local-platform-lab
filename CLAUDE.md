@@ -83,6 +83,14 @@ Requirements:
 
 Document the security implications of allowing CI runners access to a Kubernetes cluster.
 
+Runners live on a dedicated **management cluster** (Milestone 3), not dev or
+prod: colocating CI compute with application workloads means arbitrary (in a
+supply-chain-compromise scenario, attacker-influenced) workflow code runs in
+the same cluster as production, with the lateral-movement and
+resource-contention risk that implies. The management cluster is also the
+intended home for centralized observability (Milestone 6) rather than
+duplicating a full stack per cluster.
+
 ---
 
 # GitOps
@@ -90,6 +98,15 @@ Document the security implications of allowing CI runners access to a Kubernetes
 Deploy Argo CD to both clusters.
 
 Argo CD should monitor the GitHub repository and reconcile declared Kubernetes state.
+
+The platform is multi-repo and self-service (see Repository Structure): this
+platform repo's `gitops/<env>/apps/` holds one lightweight `Application`
+manifest per onboarded app, each pointing at that app's *own* repo and its
+own `deploy/overlays/<env>` path. Argo CD's repo credentials are a
+credential *template* (`argocd.argoproj.io/secret-type: repo-creds`,
+matched by GitHub account URL prefix), not one secret per repo -- so
+onboarding a new app-team repo is exactly one Terraform-free change: add
+its `Application` manifest here.
 
 GitHub Actions should NOT directly deploy application manifests using kubectl unless specifically testing a non-GitOps pattern.
 
@@ -600,18 +617,17 @@ Never rely on manually changing production Kubernetes resources as the normal ro
 
 # Repository Structure
 
-Prefer a structure similar to:
+**This is a multi-repo, self-service platform, not a monorepo.** One
+platform repo owns clusters and cluster-facing GitOps; each application
+owns its own repo end to end (code, tests, container build, semantic
+versioning, deploy manifests, promotion). Onboarding a new app is one
+Application-manifest commit in the platform repo -- never a Terraform
+change, never write access to the platform repo for the app team.
+
+## Platform repo (this one, `local-platform-lab`)
 
 ```
 .
-├── apps/
-│   ├── hello-world/
-│   └── failure-demo/
-│
-├── clusters/
-│   ├── dev/
-│   └── prod/
-│
 ├── platform/
 │   ├── argocd/
 │   ├── argo-rollouts/
@@ -623,24 +639,55 @@ Prefer a structure similar to:
 │
 ├── gitops/
 │   ├── dev/
-│   └── prod/
+│   │   └── apps/        # one Application manifest per onboarded app,
+│   └── prod/             # pointing at that app's own repo
 │
 ├── terraform/
 │   ├── modules/
-│   └── environments/
+│   └── environments/     # dev, prod, and (Milestone 3) management
 │
 ├── scripts/
 │
-├── tests/
-│   ├── integration/
-│   ├── synthetic/
-│   └── failure/
-│
 ├── .github/
-│   └── workflows/
+│   └── workflows/        # terraform validate, GitOps manifest validate,
+│                          # real end-to-end integration test
 │
 └── CLAUDE.md
 ```
+
+## App repos (one per self-service app, e.g. `local-platform-lab-app-1`)
+
+```
+.
+├── main.go, internal/, go.mod, ...    # the app itself
+├── Dockerfile
+│
+├── deploy/
+│   ├── base/              # Kustomize base
+│   └── overlays/
+│       ├── dev/           # images: pinned digest, patched by this repo's own CI
+│       └── prod/          # images: pinned digest, patched by this repo's own release
+│
+├── scripts/
+│   └── smoke-test.sh      # asserts the platform's app contract: /, /health,
+│                           # /ready, /version, /metrics
+│
+└── .github/
+    └── workflows/
+        ├── ci.yml          # lint, test, ephemeral-cluster smoke test, build,
+        │                    # push to GHCR, patch deploy/overlays/dev
+        └── release.yml     # gated on ci.yml succeeding; semantic-release,
+                             # then promotes the same digest (no rebuild) to
+                             # deploy/overlays/prod
+```
+
+Each app repo's own CI is the only thing that ever writes to that repo;
+the platform repo is never a target of an app team's automation, and an
+app team never needs credentials scoped beyond their own repo.
+
+`tests/integration|synthetic|failure` from earlier drafts of this
+structure are superseded by each repo owning its own tests this way,
+plus the platform repo's own integration test.
 
 ---
 
@@ -699,20 +746,31 @@ Do not attempt to build the entire platform at once.
 
 ## Milestone 3
 
+* dedicated management Kind cluster (not dev, not prod --
+  see GitHub Actions Runners)
+* self-hosted GitHub Actions runners (GitHub Actions Runner Controller)
+  for both the platform repo and self-service app repos
+* RBAC scoped to what runners actually need (e.g. reaching dev/prod's
+  Argo CD API for real integration testing), not broad cluster access
+* documented security implications of CI compute sharing infra with
+  application workloads (the reason it's a separate cluster)
+
+## Milestone 4
+
 * Gateway API
 * Istio or Envoy Gateway
 * local DNS
 * cert-manager
 * HTTPS application access
 
-## Milestone 4
+## Milestone 5
 
 * Argo Rollouts
 * canary
 * blue/green
 * automated rollback
 
-## Milestone 5
+## Milestone 6
 
 * Prometheus
 * Grafana
@@ -721,8 +779,10 @@ Do not attempt to build the entire platform at once.
 * OpenTelemetry
 * Blackbox Exporter
 * rollout dashboards
+* deployed on the management cluster (Milestone 3), centralized rather
+  than duplicated per cluster
 
-## Milestone 6
+## Milestone 7
 
 * Kyverno
 * Cosign
@@ -730,7 +790,7 @@ Do not attempt to build the entire platform at once.
 * trusted registry/signature enforcement
 * security policy testing
 
-## Milestone 7
+## Milestone 8
 
 * A/B testing
 * dark launches
