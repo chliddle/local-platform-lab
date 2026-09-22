@@ -649,8 +649,7 @@ change, never write access to the platform repo for the app team.
 ├── scripts/
 │
 ├── .github/
-│   └── workflows/        # terraform validate, GitOps manifest validate,
-│                          # real end-to-end integration test
+│   └── workflows/        # terraform validate, GitOps manifest validate
 │
 └── CLAUDE.md
 ```
@@ -687,8 +686,14 @@ the platform repo is never a target of an app team's automation, and an
 app team never needs credentials scoped beyond their own repo.
 
 `tests/integration|synthetic|failure` from earlier drafts of this
-structure are superseded by each repo owning its own tests this way,
-plus the platform repo's own integration test.
+structure are superseded by each repo owning its own tests this way.
+Real cross-repo integration testing (does a platform change break an
+already-onboarded app, and vice versa) is deferred to Milestone 3: a
+throwaway-Kind-cluster version of this was tried and dropped (see git
+history) after repeatedly hitting Argo CD's reconciliation-timer lag on a
+cold cluster spun up fresh every run -- a cost of that specific model,
+not a real bug, and moot once self-hosted runners can test against the
+real, already-warm dev/prod clusters instead.
 
 ---
 
@@ -771,6 +776,13 @@ Healthy in both dev and prod.
   for both the platform repo and self-service app repos
 * RBAC scoped to what runners actually need (e.g. reaching dev/prod's
   Argo CD API for real integration testing), not broad cluster access
+* real cross-repo integration testing against the actual dev/prod
+  clusters (a platform change doesn't break an already-onboarded app,
+  and vice versa) -- a throwaway-Kind-cluster version of this was tried
+  first from GitHub-hosted runners and dropped (see Repository
+  Structure); testing against the real, already-warm clusters via
+  self-hosted runners avoids the reconciliation-timing problem that
+  killed that approach
 * documented security implications of CI compute sharing infra with
   application workloads (the reason it's a separate cluster)
 
