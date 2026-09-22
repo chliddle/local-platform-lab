@@ -14,8 +14,9 @@ manifests live in each app team's own repo (e.g.
 [template-test-1](https://github.com/chliddle/template-test-1), generated
 from the
 [local-platform-lab-app-template](https://github.com/chliddle/local-platform-lab-app-template)
-template repo). Onboarding a new app never requires touching this repo's
-Terraform.
+template repo). Onboarding a new app is always one GitOps manifest here,
+and only touches this repo's Terraform if the app needs its own
+namespace.
 
 ## Prerequisites
 
@@ -93,14 +94,19 @@ matched by URL **prefix** (`https://github.com/chliddle/`), not a secret
 per repo. That single Terraform-managed secret already covers any repo
 under this GitHub account, present or future.
 
-So onboarding a new self-service app repo is exactly one change here: add
-an `Application` manifest under `gitops/dev/apps/` and `gitops/prod/apps/`
-pointing at that repo's own deploy overlays (see
+So onboarding a new self-service app repo is always this one change here:
+add an `Application` manifest under `gitops/dev/apps/` and
+`gitops/prod/apps/` pointing at that repo's own deploy overlays (see
 [gitops/dev/apps/template-test-1.yaml](gitops/dev/apps/template-test-1.yaml)
-for the pattern). No Terraform changes, no new secret, no coordination
-with the platform team beyond that one file. The app team's repo owns
-everything else -- its own CI, its own semantic-release, its own
-dev-to-prod promotion -- entirely independently.
+for the pattern) -- no new secret, no coordination with the platform team
+beyond that one file. If the new app needs its own namespace (the
+template's default `deploy/base/` names Kubernetes objects, including the
+namespace, after the app), that's also the one place onboarding still
+touches Terraform: add a `kubernetes_namespace_v1` + GHCR pull-secret pair
+in `terraform/environments/{dev,prod}/main.tf`, copying the existing
+pattern -- always on the platform side, never the app team's. The app
+team's repo owns everything else -- its own CI, its own semantic-release,
+its own dev-to-prod promotion -- entirely independently.
 
 New app teams start from
 [local-platform-lab-app-template](https://github.com/chliddle/local-platform-lab-app-template)

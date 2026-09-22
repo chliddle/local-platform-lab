@@ -728,22 +728,40 @@ Wait for approval before performing significant architectural changes while oper
 
 Do not attempt to build the entire platform at once.
 
-## Milestone 1
+**Status: Milestones 1-2 complete (and extended into a self-service
+multi-repo platform, below). Milestone 3 is next.**
 
-* Kind dev cluster
-* Terraform/bootstrap automation
-* one hello-world application
-* GitHub Actions CI
-* GHCR image
-* Argo CD
-* basic GitOps deployment
+## Milestone 1 -- complete
 
-## Milestone 2
+* [x] Kind dev cluster
+* [x] Terraform/bootstrap automation
+* [x] one hello-world application
+* [x] GitHub Actions CI
+* [x] GHCR image
+* [x] Argo CD
+* [x] basic GitOps deployment
 
-* prod Kind cluster
-* environment GitOps structure
-* immutable digest promotion
-* semantic releases
+## Milestone 2 -- complete
+
+* [x] prod Kind cluster
+* [x] environment GitOps structure
+* [x] immutable digest promotion
+* [x] semantic releases
+
+Evolved beyond the original scope into a **multi-repo, self-service
+platform** (see Repository Structure): this platform repo owns only
+clusters and cluster-facing GitOps; application code, CI, semantic
+versioning, and deploy manifests live entirely in each app team's own
+repo. New app teams start from
+[local-platform-lab-app-template](https://github.com/chliddle/local-platform-lab-app-template)
+(click "Use this template" on GitHub) -- a one-time `template-init`
+workflow renames the Go module path, app/Kubernetes-object name, and
+container image to match the new repo automatically, so onboarding never
+requires manual configuration beyond one `Application` manifest on the
+platform side (and, only if the app needs its own namespace, one small
+Terraform addition). `template-test-1` is the platform's live
+example/test app, generated from that template and running Synced and
+Healthy in both dev and prod.
 
 ## Milestone 3
 
