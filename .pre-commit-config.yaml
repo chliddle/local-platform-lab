@@ -1,0 +1,8 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    # Pinned to a commit SHA, not a mutable tag -- same reasoning as every
+    # GitHub Actions pin in this project (Milestone 3): a tag can be
+    # repointed by the maintainer or anyone who compromises their account.
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1
+    hooks:
+      - id: gitleaks

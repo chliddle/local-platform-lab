@@ -28,6 +28,17 @@ namespace.
 - [kustomize](https://kustomize.io/) (only needed if you want to run the
   same checks CI runs, locally)
 
+## Pre-commit hooks
+
+[gitleaks](https://github.com/gitleaks/gitleaks) scans every commit for
+hardcoded secrets before it's made -- catches a mistake before it ever
+reaches GitHub's push protection, let alone a public commit history.
+
+```bash
+brew install pre-commit   # or: pip install pre-commit
+pre-commit install        # once per clone -- wires the hook into .git/hooks/
+```
+
 ## Secrets
 
 This repo and every app repo under this GitHub account are **private**.
