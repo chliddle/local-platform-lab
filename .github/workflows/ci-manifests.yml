@@ -5,13 +5,11 @@ on:
     paths:
       - "gitops/**"
       - "platform/**"
-      - "apps/hello-world/k8s/**"
   push:
     branches: [main]
     paths:
       - "gitops/**"
       - "platform/**"
-      - "apps/hello-world/k8s/**"
 
 jobs:
   validate:
@@ -19,22 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install kustomize
-        run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s 5.4.2
-          sudo mv kustomize /usr/local/bin/kustomize
-
-      - name: kustomize build (dev overlay)
-        run: kustomize build gitops/dev/hello-world > /dev/null
-
-      - name: kustomize build (prod overlay)
-        run: kustomize build gitops/prod/hello-world > /dev/null
-
       # No live cluster is available in CI, so kubectl can't discover the
       # Argo CD Application CRD to do a real dry-run. Sanity-check these as
       # plain YAML instead: parses cleanly and has the fields Argo CD
       # requires. Full schema validation only ever happens against the real
       # cluster, via Argo CD itself refusing to sync an invalid Application.
+      # (Workload Kustomize overlays -- deploy/base, deploy/overlays/* --
+      # now live in each app's own repo and are validated by that repo's
+      # own CI, not here.)
       - run: pip install --quiet pyyaml
 
       - name: Validate Argo CD Application manifests are well-formed YAML

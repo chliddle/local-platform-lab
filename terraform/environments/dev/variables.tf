@@ -15,6 +15,12 @@ variable "github_repo_url" {
   default     = "https://github.com/chliddle/local-platform-lab.git"
 }
 
+variable "github_org_url" {
+  type        = string
+  description = "URL prefix for the Argo CD repo-creds credential template -- covers every repo under this GitHub account (this platform repo and any self-service app repo onboarded later) with no per-repo Terraform change needed."
+  default     = "https://github.com/chliddle/"
+}
+
 variable "github_username" {
   type        = string
   description = "GitHub username, used for both the Argo CD repo credential and the GHCR pull secret. Set via TF_VAR_github_username."

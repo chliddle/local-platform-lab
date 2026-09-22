@@ -25,21 +25,26 @@ resource "helm_release" "argocd" {
   values = [file("${path.module}/../../../platform/argocd/values-prod.yaml")]
 }
 
-# Lets Argo CD read this repo's gitops/ and platform/argocd/ paths.
-# The repo is private, so this secret is required -- credentials come from
-# TF_VAR_github_token only, never committed.
+# A credential TEMPLATE (secret-type: repo-creds), not a single-repo
+# secret -- matched by URL PREFIX, so it covers this platform repo AND any
+# self-service app-team repo onboarded later (e.g. local-platform-lab-app-1)
+# with zero further Terraform changes. This is what makes app onboarding
+# genuinely self-service: adding a new app is "commit an Application
+# manifest to gitops/*/apps/", never "touch Terraform". All repos are
+# private, so this credential is required -- comes from TF_VAR_github_token
+# only, never committed.
 resource "kubernetes_secret_v1" "argocd_repo_creds" {
   metadata {
-    name      = "local-platform-repo-creds"
+    name      = "github-repo-creds"
     namespace = kubernetes_namespace_v1.argocd.metadata[0].name
     labels = {
-      "argocd.argoproj.io/secret-type" = "repository"
+      "argocd.argoproj.io/secret-type" = "repo-creds"
     }
   }
 
   data = {
     type     = "git"
-    url      = var.github_repo_url
+    url      = var.github_org_url
     username = var.github_username
     password = var.github_token
   }

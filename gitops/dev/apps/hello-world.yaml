@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chliddle/local-platform-lab.git
+    repoURL: https://github.com/chliddle/local-platform-lab-app-1.git
     targetRevision: main
-    path: gitops/dev/hello-world
+    path: deploy/overlays/dev
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-world
