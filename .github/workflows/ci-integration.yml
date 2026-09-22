@@ -61,6 +61,37 @@ jobs:
       - name: Wait for Argo CD server rollout
         run: kubectl -n "$ARGOCD_NS" rollout status deployment/argocd-server --timeout=180s
 
+      # Argo CD's automated sync policy doesn't react to a fresh git state
+      # immediately -- it relies on its own background reconciliation timer
+      # (default ~3min), which on a cold cluster (argocd-server just became
+      # Ready, no reconciliation loop has run yet) can leave "root" sitting
+      # at sync status Unknown for longer than the child-app wait loop below
+      # budgets for -- observed for real: the root app never got around to
+      # creating the "template-test-1" Application object within 5 minutes,
+      # failing with "applications.argoproj.io not found", not a real
+      # platform bug. A hard refresh forces immediate reconciliation instead
+      # of waiting on the timer (same fix used manually against the real
+      # dev/prod clusters after this exact symptom).
+      - name: Force-refresh and wait for the root app-of-apps
+        run: |
+          kubectl -n "$ARGOCD_NS" annotate application root argocd.argoproj.io/refresh=hard --overwrite
+          ready=false
+          for i in $(seq 1 30); do
+            sync=$(kubectl -n "$ARGOCD_NS" get application root -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")
+            health=$(kubectl -n "$ARGOCD_NS" get application root -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")
+            if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
+              echo "root is Synced+Healthy"
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" != "true" ]; then
+            echo "FAIL: root did not become Synced+Healthy in time (sync=$sync health=$health)"
+            kubectl -n "$ARGOCD_NS" get application root -o yaml
+            exit 1
+          fi
+
       # Discovers apps from gitops/dev/apps/*.yaml rather than a hardcoded
       # list, so this test automatically covers every self-service app
       # onboarded later without needing its own updates.
@@ -78,6 +109,11 @@ jobs:
             echo "==> waiting for Application '$app' to be Synced+Healthy"
             ready=false
             for i in $(seq 1 30); do
+              # Force-refresh each attempt: the child Application itself
+              # may not exist yet on the first few iterations (root's own
+              # sync just created it), and once it does exist it's subject
+              # to the same reconciliation-timer lag as root above.
+              kubectl -n "$ARGOCD_NS" annotate application "$app" argocd.argoproj.io/refresh=hard --overwrite 2>/dev/null || true
               sync=$(kubectl -n "$ARGOCD_NS" get application "$app" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")
               health=$(kubectl -n "$ARGOCD_NS" get application "$app" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")
               if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
