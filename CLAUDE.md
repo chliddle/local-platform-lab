@@ -792,9 +792,11 @@ Milestone 4 adds infrastructure (self-hosted runners) that a compromised
 workflow could reach.
 
 * `LICENSE` in each repo
-* branch protection on `main` in all three repos: required status checks
-  before merge, no force-push, so an outside PR can't merge itself even
-  if it happens to pass CI
+* branch protection on `main` in all three repos: no force-push, no
+  deletion. Required status checks are a separate per-repo choice (see
+  the zizmor bullet below) -- outside contributors can't merge anything
+  anywhere regardless, since only the owner has write access to any of
+  the three repos
 * every third-party `uses:` action across every workflow in all three
   repos pinned to a full commit SHA, not a mutable tag -- a tag can be
   repointed by the action's maintainer or anyone who compromises their
@@ -822,6 +824,24 @@ workflow could reach.
   even made -- earlier and cheaper than GitHub's push protection;
   verified live that it blocks a realistic fake credential while not
   false-positiving on a known placeholder (AWS's own docs example key)
+* a zizmor pre-commit hook (offline audits only, so it never depends on
+  a developer's GitHub token being valid) and a `security lint` CI job
+  (online audits) in all three repos, catching dangerous GitHub Actions
+  patterns -- confirmed by hand that it blocks a deliberately
+  reintroduced `pull_request_target` + PR-title-injection test workflow.
+  **Required as a branch-protection status check only on the platform
+  repo.** The two app repos' own automation (`ci.yml`'s digest-bump
+  commit, `release.yml`'s prod promotion, `template-init.yml`) pushes
+  bot-authored commits directly to `main`, and GitHub rejects *any*
+  direct push whose exact commit SHA hasn't already had a required check
+  run against it -- a freshly-created bot commit never has one, so
+  requiring the check there breaks the self-service pipeline itself
+  (confirmed live: `update-dev-digest` failed with "GH006: Protected
+  branch update failed... Required status check 'zizmor' is expected").
+  Required status checks are fundamentally a PR-merge-gate mechanism,
+  not a way to gate direct pushes from same-repo automation -- keep this
+  in mind before requiring any check on a repo whose own CI pushes to
+  its default branch
 * decide and document: do GHCR packages also go public, or stay private
   while the repos go public? Independent choice, not automatic either
   way
