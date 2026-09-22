@@ -1,0 +1,96 @@
+name: integration test
+
+# Proves a platform change (Terraform, Argo CD config, an Application
+# pointer) doesn't break the apps already onboarded -- runs the *real*
+# bootstrap against a throwaway Kind cluster: real Terraform apply, real
+# Argo CD, the real repo-creds credential template, syncing the real
+# published image from each app's own repo via the real GitOps path. Not a
+# mock -- if this passes, the actual self-service pipeline works end to end.
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "platform/**"
+      - "gitops/**"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "platform/**"
+      - "gitops/**"
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_github_username: ${{ secrets.CI_GITHUB_USERNAME }}
+      TF_VAR_github_token: ${{ secrets.CI_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s 5.4.2
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      - run: pip install --quiet pyyaml
+
+      - name: Bootstrap dev cluster (real terraform apply)
+        working-directory: terraform/environments/dev
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Wait for Argo CD
+        working-directory: terraform/environments/dev
+        run: |
+          echo "KUBECONFIG=$(terraform output -raw kubeconfig_path)" >> "$GITHUB_ENV"
+          echo "ARGOCD_NS=$(terraform output -raw argocd_namespace)" >> "$GITHUB_ENV"
+
+      - name: Wait for Argo CD server rollout
+        run: kubectl -n "$ARGOCD_NS" rollout status deployment/argocd-server --timeout=180s
+
+      # Discovers apps from gitops/dev/apps/*.yaml rather than a hardcoded
+      # list, so this test automatically covers every self-service app
+      # onboarded later without needing its own updates.
+      - name: Wait for onboarded apps to sync, then smoke-test each
+        run: |
+          apps=$(python3 .github/scripts/app_names.py dev)
+          if [ -z "$apps" ]; then
+            echo "no apps onboarded in gitops/dev/apps/, nothing to test"
+            exit 0
+          fi
+
+          while IFS= read -r app; do
+            [ -z "$app" ] && continue
+
+            echo "==> waiting for Application '$app' to be Synced+Healthy"
+            ready=false
+            for i in $(seq 1 30); do
+              sync=$(kubectl -n "$ARGOCD_NS" get application "$app" -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")
+              health=$(kubectl -n "$ARGOCD_NS" get application "$app" -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")
+              if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
+                echo "$app is Synced+Healthy"
+                ready=true
+                break
+              fi
+              sleep 10
+            done
+            if [ "$ready" != "true" ]; then
+              echo "FAIL: $app did not become Synced+Healthy in time (sync=$sync health=$health)"
+              kubectl -n "$ARGOCD_NS" get application "$app" -o yaml
+              exit 1
+            fi
+
+            ns=$(kubectl -n "$ARGOCD_NS" get application "$app" -o jsonpath='{.spec.destination.namespace}')
+            echo "==> smoke-testing '$app' in namespace '$ns'"
+            kubectl -n "$ns" port-forward "svc/$app" 18080:8080 &
+            pf_pid=$!
+            sleep 3
+            bash scripts/smoke-test.sh http://localhost:18080
+            kill "$pf_pid" 2>/dev/null || true
+          done <<< "$apps"
