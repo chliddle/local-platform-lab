@@ -1,0 +1,29 @@
+name: security lint
+
+# Milestone 3 guardrail: catches a dangerous GitHub Actions pattern
+# (pull_request_target misuse, template injection, excessive permissions,
+# unpinned actions, etc.) automatically on every future change, so
+# reviewing this by hand once isn't the only thing standing between a
+# future commit and a real regression. No path filter, deliberately --
+# zizmor runs in seconds, so there's no cost to always running it, and a
+# path filter is one more way a future change could slip past unchecked.
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          annotations: true

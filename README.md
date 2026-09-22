@@ -33,6 +33,12 @@ namespace.
 [gitleaks](https://github.com/gitleaks/gitleaks) scans every commit for
 hardcoded secrets before it's made -- catches a mistake before it ever
 reaches GitHub's push protection, let alone a public commit history.
+[zizmor](https://github.com/zizmorcore/zizmor) scans every workflow
+change for dangerous GitHub Actions patterns (`pull_request_target`
+misuse, template injection, excessive permissions, unpinned actions) --
+the same check also runs as a required CI job (`security lint`), with
+online audits enabled there; the local hook runs offline only, so it
+never depends on a GitHub token being present.
 
 ```bash
 brew install pre-commit   # or: pip install pre-commit
