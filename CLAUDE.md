@@ -746,8 +746,8 @@ Wait for approval before performing significant architectural changes while oper
 
 Do not attempt to build the entire platform at once.
 
-**Status: Milestones 1-2 complete (and extended into a self-service
-multi-repo platform, below). Milestone 3 is next.**
+**Status: Milestones 1-3 complete (Milestone 2 extended into a
+self-service multi-repo platform, below). Milestone 4 is next.**
 
 ## Milestone 1 -- complete
 
@@ -781,7 +781,7 @@ Terraform addition). `template-test-1` is the platform's live
 example/test app, generated from that template and running Synced and
 Healthy in both dev and prod.
 
-## Milestone 3
+## Milestone 3 -- complete
 
 Repo and supply-chain hardening across all three repos (platform,
 app template, and by inheritance every repo generated from it),
@@ -817,9 +817,18 @@ workflow could reach.
   already in place (no secret has ever been committed to any of the
   three repos -- verified via full git history scan; re-verify at the
   point of actually flipping visibility)
+* a gitleaks pre-commit hook (`.pre-commit-config.yaml`, pinned to a
+  commit SHA) in all three repos, catching a secret before the commit is
+  even made -- earlier and cheaper than GitHub's push protection;
+  verified live that it blocks a realistic fake credential while not
+  false-positiving on a known placeholder (AWS's own docs example key)
 * decide and document: do GHCR packages also go public, or stay private
   while the repos go public? Independent choice, not automatic either
   way
+
+**Status: complete.** All three repos are public, license (MIT),
+branch-protected, action-pinned, secret-scanned (GitHub push protection
++ local pre-commit), and Dependabot-enabled. GHCR packages stay private.
 
 ## Milestone 4
 
