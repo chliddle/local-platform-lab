@@ -67,16 +67,26 @@ terraform -chdir="${env_dir}" apply -auto-approve
 
 kubeconfig_path="$(terraform -chdir="${env_dir}" output -raw kubeconfig_path)"
 argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
+cluster_name="$(terraform -chdir="${env_dir}" output -raw cluster_name)"
 
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
+
+echo "==> Merging context into ~/.kube/config"
+mkdir -p "${HOME}/.kube"
+[ -f "${HOME}/.kube/config" ] && cp "${HOME}/.kube/config" "${HOME}/.kube/config.bak"
+KUBECONFIG="${HOME}/.kube/config:${kubeconfig_path}" kubectl config view --flatten >"${HOME}/.kube/config.new"
+mv "${HOME}/.kube/config.new" "${HOME}/.kube/config"
+chmod 600 "${HOME}/.kube/config"
+context_name="kind-${cluster_name}"
 
 cat <<EOF
 
 ==> Bootstrap complete (${env_name}).
 
-Use this cluster:
-  export KUBECONFIG=${kubeconfig_path}
+Use this cluster (merged into ~/.kube/config -- the isolated
+${kubeconfig_path} still works too, e.g. for scripting):
+  kubectl config use-context ${context_name}
 
 Argo CD UI (admin password below, then browse https://localhost:8080):
   kubectl -n ${argocd_namespace} port-forward svc/argocd-server 8080:443 &

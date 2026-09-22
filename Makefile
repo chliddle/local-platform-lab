@@ -7,7 +7,7 @@ bootstrap-prod:
 	./scripts/bootstrap.sh prod
 
 destroy:
-	terraform -chdir=terraform/environments/dev destroy
+	./scripts/teardown.sh dev
 
 destroy-prod:
-	terraform -chdir=terraform/environments/prod destroy
+	./scripts/teardown.sh prod

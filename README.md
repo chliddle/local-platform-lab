@@ -58,13 +58,20 @@ digest-update and release commits.
 ```bash
 make bootstrap                                # dev cluster
 make bootstrap-prod                            # prod cluster
-export KUBECONFIG=$(terraform -chdir=terraform/environments/dev output -raw kubeconfig_path)
 
+kubectl config use-context kind-local-platform-dev
 kubectl get nodes
 kubectl -n argocd get application hello-world
 ```
 
 Both are idempotent -- re-running reconciles any drift instead of failing.
+Each bootstrap also merges that cluster's context into `~/.kube/config`
+(backed up first, to `~/.kube/config.bak`), so `kubectl config
+use-context kind-local-platform-{dev,prod}` works without exporting
+`KUBECONFIG` by hand. The isolated per-environment kubeconfig
+(`terraform/environments/<env>/kubeconfig-*`, what `terraform output
+kubeconfig_path` gives you) still exists too, for scripting that
+shouldn't depend on or disturb your current kubectl context.
 
 ## Tear down
 
@@ -72,6 +79,9 @@ Both are idempotent -- re-running reconciles any drift instead of failing.
 make destroy
 make destroy-prod
 ```
+
+Also removes that cluster's context from `~/.kube/config`, so a
+destroyed cluster doesn't leave a dead entry behind.
 
 ## Self-service app onboarding
 
