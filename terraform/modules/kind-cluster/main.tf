@@ -24,7 +24,15 @@ resource "terraform_data" "kind_cluster" {
   ]
 
   provisioner "local-exec" {
-    command = <<-EOT
+    # local-exec runs via the OS-default /bin/sh unless told otherwise --
+    # that's bash-backed on macOS (tolerates "-o pipefail" silently even in
+    # sh mode) but dash on Linux GitHub Actions runners, which doesn't
+    # support it at all and fails the whole command immediately. Pinning
+    # bash explicitly makes this portable instead of accidentally
+    # macOS-only; confirmed as the real cause of the integration-test
+    # workflow's "Illegal option -o pipefail" failure.
+    interpreter = ["bash", "-c"]
+    command     = <<-EOT
       set -euo pipefail
       if kind get clusters | grep -qx "${var.cluster_name}"; then
         echo "kind cluster '${var.cluster_name}' already exists, skipping create"
@@ -38,8 +46,9 @@ resource "terraform_data" "kind_cluster" {
   }
 
   provisioner "local-exec" {
-    when    = destroy
-    command = "kind delete cluster --name ${self.input} || true"
+    when        = destroy
+    interpreter = ["bash", "-c"]
+    command     = "kind delete cluster --name ${self.input} || true"
   }
 
   depends_on = [local_file.kind_config]
