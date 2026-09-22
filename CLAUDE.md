@@ -80,15 +80,28 @@ Requirements:
 * runner workloads should use dedicated namespaces/service accounts
 * runner permissions should follow least privilege
 * consider ephemeral runners
+* a rootless/daemonless image builder (BuildKit rootless or Kaniko) for
+  any workflow that builds a container image -- the host Docker socket
+  and privileged Docker-in-Docker are both host-escape vectors and are
+  not used
 
 Document the security implications of allowing CI runners access to a Kubernetes cluster.
 
-Runners live on a dedicated **management cluster** (Milestone 3), not dev or
+**Binding constraint, since this project is intended to go public (see
+Milestone 3): self-hosted runners may only be triggered by `push` to
+`main` or `workflow_dispatch`, never by `pull_request`.** A self-hosted
+runner executing a workflow from a fork's PR is a remote-code-execution
+vector against whatever hosts the runner -- in this project's case, the
+user's own machine. Anything that needs to validate an external PR
+(lint/test/build-check) runs on GitHub-hosted runners instead, which are
+safe by design regardless of who opened the PR.
+
+Runners live on a dedicated **management cluster** (Milestone 4), not dev or
 prod: colocating CI compute with application workloads means arbitrary (in a
 supply-chain-compromise scenario, attacker-influenced) workflow code runs in
 the same cluster as production, with the lateral-movement and
 resource-contention risk that implies. The management cluster is also the
-intended home for centralized observability (Milestone 6) rather than
+intended home for centralized observability (Milestone 7) rather than
 duplicating a full stack per cluster.
 
 ---
@@ -644,7 +657,7 @@ change, never write access to the platform repo for the app team.
 │
 ├── terraform/
 │   ├── modules/
-│   └── environments/     # dev, prod, and (Milestone 3) management
+│   └── environments/     # dev, prod, and (Milestone 4) management
 │
 ├── scripts/
 │
@@ -688,7 +701,7 @@ app team never needs credentials scoped beyond their own repo.
 `tests/integration|synthetic|failure` from earlier drafts of this
 structure are superseded by each repo owning its own tests this way.
 Real cross-repo integration testing (does a platform change break an
-already-onboarded app, and vice versa) is deferred to Milestone 3: a
+already-onboarded app, and vice versa) is deferred to Milestone 4: a
 throwaway-Kind-cluster version of this was tried and dropped (see git
 history) after repeatedly hitting Argo CD's reconciliation-timer lag on a
 cold cluster spun up fresh every run -- a cost of that specific model,
@@ -770,10 +783,56 @@ Healthy in both dev and prod.
 
 ## Milestone 3
 
+Repo and supply-chain hardening across all three repos (platform,
+app template, and by inheritance every repo generated from it),
+done before flipping any of them public. Motivation: going OSS changes
+the threat model from "only I can push code that runs" to "anyone can
+open a PR," and that has to be accounted for architecturally before
+Milestone 4 adds infrastructure (self-hosted runners) that a compromised
+workflow could reach.
+
+* `LICENSE` in each repo
+* branch protection on `main` in all three repos: required status checks
+  before merge, no force-push, so an outside PR can't merge itself even
+  if it happens to pass CI
+* every third-party `uses:` action across every workflow in all three
+  repos pinned to a full commit SHA, not a mutable tag -- a tag can be
+  repointed by the action's maintainer or anyone who compromises their
+  account, and would then run automatically with whatever permissions
+  that job has
+* every job's `permissions:` block audited to least privilege (already
+  mostly true from earlier milestones; verify completeness here)
+* confirm no workflow uses `pull_request_target` (executes with access to
+  secrets while checking out/building untrusted PR content -- a
+  well-known compromise vector GitHub explicitly warns against)
+* **binding constraint for Milestone 4, stated here because it must be
+  true before that work starts, not added after**: self-hosted runners
+  may only be triggered by `push` to `main` or `workflow_dispatch` --
+  never by `pull_request`, regardless of source. GitHub's own guidance is
+  explicit that self-hosted runners executing fork-PR workflows on a
+  public repo is a remote-code-execution vector against whatever hosts
+  the runner (in this project's case, the user's own machine)
+* GitHub secret scanning / push protection enabled on all three repos,
+  as an ongoing safeguard on top of the disciplined secrets handling
+  already in place (no secret has ever been committed to any of the
+  three repos -- verified via full git history scan; re-verify at the
+  point of actually flipping visibility)
+* decide and document: do GHCR packages also go public, or stay private
+  while the repos go public? Independent choice, not automatic either
+  way
+
+## Milestone 4
+
 * dedicated management Kind cluster (not dev, not prod --
   see GitHub Actions Runners)
 * self-hosted GitHub Actions runners (GitHub Actions Runner Controller)
-  for both the platform repo and self-service app repos
+  for both the platform repo and self-service app repos, wired up per
+  Milestone 3's binding trigger constraint from the start
+* a rootless/daemonless image builder (BuildKit in rootless mode, or
+  Kaniko) for any workflow that builds a container image on a
+  self-hosted runner -- mounting the host's Docker socket or running a
+  privileged Docker-in-Docker sidecar are both well-known host-escape
+  vectors and are ruled out for this project
 * RBAC scoped to what runners actually need (e.g. reaching dev/prod's
   Argo CD API for real integration testing), not broad cluster access
 * real cross-repo integration testing against the actual dev/prod
@@ -786,7 +845,7 @@ Healthy in both dev and prod.
 * documented security implications of CI compute sharing infra with
   application workloads (the reason it's a separate cluster)
 
-## Milestone 4
+## Milestone 5
 
 * Gateway API
 * Istio or Envoy Gateway
@@ -794,14 +853,14 @@ Healthy in both dev and prod.
 * cert-manager
 * HTTPS application access
 
-## Milestone 5
+## Milestone 6
 
 * Argo Rollouts
 * canary
 * blue/green
 * automated rollback
 
-## Milestone 6
+## Milestone 7
 
 * Prometheus
 * Grafana
@@ -810,10 +869,10 @@ Healthy in both dev and prod.
 * OpenTelemetry
 * Blackbox Exporter
 * rollout dashboards
-* deployed on the management cluster (Milestone 3), centralized rather
+* deployed on the management cluster (Milestone 4), centralized rather
   than duplicated per cluster
 
-## Milestone 7
+## Milestone 8
 
 * Kyverno
 * Cosign
@@ -821,7 +880,7 @@ Healthy in both dev and prod.
 * trusted registry/signature enforcement
 * security policy testing
 
-## Milestone 8
+## Milestone 9
 
 * A/B testing
 * dark launches
