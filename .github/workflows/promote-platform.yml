@@ -1,0 +1,110 @@
+name: promote platform infra to prod
+
+# Milestone 5, Phase 2: dev's platform infra (and the app-of-apps roots
+# generally) track `main` directly for fast feedback; prod's root-platform
+# instead tracks the `prod` branch (see
+# platform/argocd/root-platform-prod.yaml), which only ever advances here
+# -- never by a direct push. This job is prod's promotion gate: on a push
+# to main that touches platform infra, it waits for every Application in
+# dev's own argocd namespace to be Synced+Healthy (not just the platform
+# ones -- the real question is "did this infra change break dev", and an
+# onboarded app silently breaking is exactly the kind of thing a
+# platform-components-only health check would miss), then fast-forwards
+# prod to that commit automatically.
+#
+# No pull_request trigger, deliberately -- same reasoning as every other
+# workflow in this repo (see ci-manifests.yml): this repo's only
+# collaborator is its owner, so there's no path for anyone but the owner
+# to run anything here, structurally.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "platform/gitops-platform-apps/**"
+      - "gitops/dev/platform/**"
+  workflow_dispatch: {}
+
+jobs:
+  promote:
+    runs-on: platform-runners
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install kubectl
+        run: |
+          arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.29.2/bin/linux/${arch}/kubectl"
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+      # dev-argocd-reader lives as a Secret in this runner pod's own
+      # namespace (scripts/sync-runner-creds.sh), read via the pod's own
+      # in-cluster ServiceAccount token -- same pattern as
+      # ci-integration.yml. Scoped by Terraform to `get` only this named
+      # Secret (see terraform/environments/management/main.tf).
+      - name: Wait for every dev Application to be Synced + Healthy
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        run: |
+          server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.server}' | base64 -d)
+          token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.token}' | base64 -d)
+          ca_file="$(mktemp)"
+          kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
+
+          deadline=$((SECONDS + 300))
+          while true; do
+            app_names=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+              -n argocd get applications -o jsonpath='{.items[*].metadata.name}')
+            not_ready=""
+            for name in $app_names; do
+              sync_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+                -n argocd get application "$name" -o jsonpath='{.status.sync.status}')
+              health_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+                -n argocd get application "$name" -o jsonpath='{.status.health.status}')
+              if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
+                not_ready="${not_ready}${name}: sync=${sync_status} health=${health_status}"$'\n'
+              fi
+            done
+            if [ -z "$not_ready" ]; then
+              echo "All dev Applications Synced+Healthy."
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for dev to become healthy. Not Synced+Healthy:"
+              echo "$not_ready"
+              rm -f "$ca_file"
+              exit 1
+            fi
+            echo "Not yet healthy, retrying in 15s:"
+            echo "$not_ready"
+            sleep 15
+          done
+          rm -f "$ca_file"
+
+      # platform-repo-push-credential is the same classic PAT dev/prod's
+      # Argo CD/GHCR secrets already use (var.github_token) -- reused
+      # rather than a fresh credential, since it's already the
+      # widest-blast-radius credential in this platform (Milestone 4's
+      # Security implications) and adding another one wouldn't reduce
+      # actual attack surface. Masked immediately: unlike a GitHub Actions
+      # `secrets.*` value, a token read from an in-cluster Secret is NOT
+      # automatically redacted from logs.
+      - name: Fast-forward prod to this commit
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        run: |
+          push_token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret platform-repo-push-credential -o jsonpath='{.data.token}' | base64 -d)
+          echo "::add-mask::${push_token}"
+
+          git push "https://x-access-token:${push_token}@github.com/chliddle/local-platform-lab.git" "HEAD:refs/heads/prod"

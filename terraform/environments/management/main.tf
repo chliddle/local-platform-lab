@@ -95,11 +95,32 @@ resource "kubernetes_secret_v1" "platform_runner_github_credential" {
   }
 }
 
-# Milestone 4, Phase D: lets runner pods read exactly the two credential
-# Secrets scripts/sync-runner-creds.sh writes here (dev-argocd-reader,
-# prod-argocd-reader) -- named by resource, not a blanket "secrets" grant,
-# so a compromised job still can't read anything else in this namespace
-# (e.g. the GitHub App/PAT credential itself). "platform-runners-gha-rs-
+# Milestone 5, Phase 2: the classic PAT already used for dev/prod's Argo CD
+# repo-creds/GHCR pull secrets (var.github_token, `repo` scope -- already
+# the widest-blast-radius credential in this platform, flagged in
+# Milestone 4's Security implications and left as-is per the user's
+# explicit call), reused here rather than minted fresh, so
+# promote-platform.yml can push the prod branch forward. A materially
+# different, narrower-scoped credential (e.g. Contents-only) was
+# considered and explicitly not chosen: adding another credential when a
+# suitable one already exists doesn't reduce this platform's actual attack
+# surface, just its credential count.
+resource "kubernetes_secret_v1" "platform_repo_push_credential" {
+  metadata {
+    name      = "platform-repo-push-credential"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  data = {
+    token = var.github_token
+  }
+}
+
+# Milestone 4, Phase D (dev-argocd-reader/prod-argocd-reader) + Milestone 5,
+# Phase 2 (platform-repo-push-credential): lets runner pods read exactly
+# these named credential Secrets -- named by resource, not a blanket
+# "secrets" grant, so a compromised job still can't read anything else in
+# this namespace (e.g. the ARC runner's own PAT). "platform-runners-gha-rs-
 # no-permission" is ARC's own default ServiceAccount for this scale set's
 # runner pods, confirmed via the EphemeralRunnerSet's pod spec -- its name
 # is accurate, it carries no RBAC until this binding.
@@ -112,7 +133,7 @@ resource "kubernetes_role_v1" "runner_reads_argocd_creds" {
   rule {
     api_groups     = [""]
     resources      = ["secrets"]
-    resource_names = ["dev-argocd-reader", "prod-argocd-reader"]
+    resource_names = ["dev-argocd-reader", "prod-argocd-reader", "platform-repo-push-credential"]
     verbs          = ["get"]
   }
 }
