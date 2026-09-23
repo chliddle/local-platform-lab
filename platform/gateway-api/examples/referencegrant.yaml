@@ -1,0 +1,19 @@
+# Gateway API restricts cross-namespace backendRefs by default -- an
+# HTTPRoute in gateway-api-examples can't reference a Service in
+# template-test-1 without the target namespace explicitly granting it via
+# a ReferenceGrant. This lives in the target namespace (template-test-1),
+# not the source namespace, by design: the namespace being referenced is
+# the one that has to opt in.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-api-examples-routes
+  namespace: template-test-1
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gateway-api-examples
+  to:
+    - group: ""
+      kind: Service

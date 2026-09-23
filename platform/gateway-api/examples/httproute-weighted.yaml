@@ -1,0 +1,25 @@
+# Weighted backendRefs example (CLAUDE.md, Gateway API section). Two
+# minimal static echo Deployments exist purely to make the split visible
+# (each responds with its own name in the body) -- real progressive
+# delivery infrastructure (Argo Rollouts, traffic shifting tied to
+# analysis) is Milestone 6's job, not this one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: echo-weighted
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /echo
+      backendRefs:
+        - name: echo-v1
+          port: 8080
+          weight: 75
+        - name: echo-v2
+          port: 8080
+          weight: 25

@@ -1,0 +1,17 @@
+# Carved from unused tail space in the shared `kind` Docker bridge network
+# (172.18.0.0/16, confirmed live via `docker network inspect kind` -- not
+# hardcoded from docs, since Kind/Docker don't guarantee this subnet).
+# Docker's bridge driver allocates container IPs sequentially from the low
+# end (dev/prod/management node containers sit at .2/.3/.4 today), so the
+# high end is free -- and dev/prod each get a disjoint slice since MetalLB
+# has no cross-cluster IPAM awareness (two independent MetalLB instances on
+# the same L2 segment would collide otherwise). Explicitly avoids the
+# network's gateway address (172.18.0.1), a documented MetalLB/Kind gotcha.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: kind-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.18.255.200-172.18.255.210

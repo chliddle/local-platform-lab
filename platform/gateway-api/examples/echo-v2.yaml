@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-v2
+  namespace: gateway-api-examples
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-v2
+  template:
+    metadata:
+      labels:
+        app: echo-v2
+    spec:
+      containers:
+        - name: http-echo
+          image: hashicorp/http-echo@sha256:fcb75f691c8b0414d670ae570240cbf95502cc18a9ba57e982ecac589760a186
+          args:
+            - -listen=:8080
+            - -text=echo-v2
+          ports:
+            - containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-v2
+  namespace: gateway-api-examples
+spec:
+  selector:
+    app: echo-v2
+  ports:
+    - port: 8080
+      targetPort: 8080

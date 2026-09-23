@@ -1,0 +1,25 @@
+# Installs Istio's own CRDs (VirtualService, DestinationRule, etc.) and
+# cluster-wide resources. Sidecar mode (the default) -- CLAUDE.md prefers
+# Istio specifically to demonstrate mTLS/workload identity/VirtualService
+# vs. Gateway API comparison, which the sidecar model demonstrates most
+# directly; ambient mode would be a different demonstration than asked for.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-base
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: base
+    targetRevision: "1.30.5"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

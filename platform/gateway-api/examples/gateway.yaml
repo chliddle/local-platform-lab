@@ -1,0 +1,23 @@
+# gatewayClassName: istio needs no separately-installed GatewayClass --
+# istiod auto-creates a GatewayClass named "istio" on startup once it
+# detects the Gateway API CRDs are present. Creating this Gateway is what
+# triggers istiod's Gateway API auto-provisioning: it deploys a proxy
+# Deployment+Service (type LoadBalancer, picked up by MetalLB) for this
+# Gateway automatically -- no separate istio-ingressgateway Helm release.
+#
+# HTTP only for now (Milestone 5, Phase 2) -- TLS listener + cert-manager
+# wiring lands in Phase 3.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: gateway-api-examples
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same

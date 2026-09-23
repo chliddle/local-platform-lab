@@ -19,10 +19,14 @@ def main():
         [
             "platform/argocd/root-app.yaml",
             "platform/argocd/root-app-prod.yaml",
+            "platform/argocd/root-platform-dev.yaml",
+            "platform/argocd/root-platform-prod.yaml",
             "platform/argocd/root-platform-management.yaml",
         ]
         + sorted(glob.glob("gitops/dev/apps/*.yaml"))
         + sorted(glob.glob("gitops/prod/apps/*.yaml"))
+        + sorted(glob.glob("gitops/dev/platform/*.yaml"))
+        + sorted(glob.glob("gitops/prod/platform/*.yaml"))
         + sorted(glob.glob("gitops/management/platform/*.yaml"))
     )
 

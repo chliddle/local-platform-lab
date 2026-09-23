@@ -1,0 +1,23 @@
+# sync-wave 1: the IPAddressPool/L2Advertisement CRDs this depends on only
+# exist once metallb.yaml (wave 0, the default) has synced -- same pattern
+# already proven for arc-controller/arc-runners (Milestone 5, Phase 1).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: main
+    path: platform/metallb/config-dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

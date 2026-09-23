@@ -98,10 +98,18 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
   }
 }
 
-# The single app-of-apps root Application. This is the only application
-# workload object Terraform ever touches directly -- everything under
-# gitops/prod/apps/ (and the template-test-1 Deployment/Service it points to) is
-# reconciled by Argo CD from Git, never applied by Terraform or CI directly.
+# Two app-of-apps root Applications, applied in one local-exec: "root"
+# (gitops/prod/apps -- onboarded self-service apps, unchanged since
+# Milestone 1) and "root-platform" (gitops/prod/platform -- MetalLB,
+# Gateway API CRDs, Istio, and later cert-manager/monitoring, new in
+# Milestone 5). Kept as separate root Applications/directories rather than
+# merged into one, so the self-service-app-onboarding boundary documented
+# in CLAUDE.md's Repository Structure stays exactly "add one Application
+# manifest here" with nothing platform-shaped mixed in.
+#
+# These are the only application workload objects Terraform ever touches
+# directly -- everything under gitops/prod/{apps,platform}/ is reconciled
+# by Argo CD from Git, never applied by Terraform or CI directly.
 #
 # Applied via the kubectl CLI (like the kind cluster itself) rather than a
 # Terraform Kubernetes-manifest provider: a CRD like Application doesn't
@@ -120,13 +128,14 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 resource "terraform_data" "argocd_root_app" {
   triggers_replace = [
     filesha256("${path.module}/../../../platform/argocd/root-app-prod.yaml"),
+    filesha256("${path.module}/../../../platform/argocd/root-platform-prod.yaml"),
     # Re-apply if the cluster itself was recreated -- this resource has no
     # real remote object Terraform can refresh/detect drift on otherwise.
     module.kind.instance_id,
   ]
 
   provisioner "local-exec" {
-    command = "kubectl --kubeconfig '${module.kind.kubeconfig_path}' apply -f '${path.module}/../../../platform/argocd/root-app-prod.yaml'"
+    command = "kubectl --kubeconfig '${module.kind.kubeconfig_path}' apply -f '${path.module}/../../../platform/argocd/root-app-prod.yaml' -f '${path.module}/../../../platform/argocd/root-platform-prod.yaml'"
   }
 
   depends_on = [helm_release.argocd, kubernetes_secret_v1.argocd_repo_creds]
