@@ -1,0 +1,44 @@
+# crds.enabled: true -- cert-manager moved CRD install to a values flag
+# rather than a separate manifest step (the old installCRDs was v1
+# terminology, superseded). No ACME/external issuer config here; this
+# project uses a purely in-cluster self-signed CA chain (see
+# platform/cert-manager/config-{dev,prod}/), so no network egress or
+# DNS-01/HTTP-01 solver setup is needed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: "v1.21.2"
+    helm:
+      valuesObject:
+        crds:
+          enabled: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        webhook:
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+        cainjector:
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

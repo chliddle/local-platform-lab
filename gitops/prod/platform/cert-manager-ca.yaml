@@ -1,0 +1,21 @@
+# See gitops/dev/platform/cert-manager-ca.yaml for the sync-wave rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-ca
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: prod
+    path: platform/cert-manager/config-prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,16 @@
+# See platform/cert-manager/config-dev/gateway-tls-cert.yaml for the full
+# rationale. Same Secret name (gateway-tls) as dev's copy, deliberately.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-tls
+  namespace: gateway-api-examples
+spec:
+  secretName: gateway-tls
+  dnsNames:
+    - "*.prod.platform.local"
+    - "prod.platform.local"
+  issuerRef:
+    name: prod-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

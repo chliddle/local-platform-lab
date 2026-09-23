@@ -1,0 +1,41 @@
+# Standard cert-manager self-signed root CA chain (Milestone 5, Phase 3):
+# bootstrap Issuer (signs itself) -> root CA Certificate (signed by the
+# bootstrap issuer) -> a second Issuer backed by that root cert/key,
+# which is what actually issues the leaf certificate below. Two-tier
+# (root -> leaf), not three -- an intermediate CA adds no learning value
+# for a single-Gateway lab beyond what the root->leaf chain already
+# demonstrates. This cluster's own root, never shared with prod (dev/prod
+# stay logically separated, same principle as everywhere else in this
+# project) -- private key generated in-cluster by cert-manager itself,
+# never touches Git.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dev-root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: local-platform-dev-root-ca
+  secretName: dev-root-ca-secret
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: dev-ca-issuer
+spec:
+  ca:
+    secretName: dev-root-ca-secret

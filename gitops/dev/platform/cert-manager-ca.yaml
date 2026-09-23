@@ -1,0 +1,22 @@
+# sync-wave 1: cert-manager's CRDs+controller (wave 0, the default) must
+# exist first -- these Certificate/ClusterIssuer resources depend on them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-ca
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: main
+    path: platform/cert-manager/config-dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

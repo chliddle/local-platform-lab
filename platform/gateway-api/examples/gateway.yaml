@@ -5,8 +5,12 @@
 # Deployment+Service (type LoadBalancer, picked up by MetalLB) for this
 # Gateway automatically -- no separate istio-ingressgateway Helm release.
 #
-# HTTP only for now (Milestone 5, Phase 2) -- TLS listener + cert-manager
-# wiring lands in Phase 3.
+# HTTPS listener's certificateRefs points at the `gateway-tls` Secret --
+# same name in both clusters, issued by each cluster's own CA with its own
+# hostnames (platform/cert-manager/config-{dev,prod}/gateway-tls-cert.yaml),
+# so this one shared manifest works unmodified on both. sync-wave 2
+# (gateway-api-examples) already runs after cert-manager-ca (wave 1), so
+# the Secret exists by the time istiod provisions this Gateway's proxy.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -18,6 +22,17 @@ spec:
     - name: http
       port: 80
       protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gateway-tls
       allowedRoutes:
         namespaces:
           from: Same

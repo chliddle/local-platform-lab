@@ -1,0 +1,23 @@
+# Leaf certificate for the Gateway's HTTPS listener (platform/gateway-api/
+# examples/gateway.yaml). Lives in gateway-api-examples (the Gateway's own
+# namespace) since a plain Certificate writing a kubernetes.io/tls Secret
+# there is the whole mechanism Gateway API's certificateRefs needs -- no
+# separate Gateway API-specific CRD from cert-manager required. Same
+# Secret name (gateway-tls) as prod's copy of this file, deliberately, so
+# the shared Gateway manifest can reference one certificateRefs name
+# regardless of cluster; the issued certificate content itself is entirely
+# separate per cluster (dev's own CA, dev's own hostnames).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-tls
+  namespace: gateway-api-examples
+spec:
+  secretName: gateway-tls
+  dnsNames:
+    - "*.dev.platform.local"
+    - "dev.platform.local"
+  issuerRef:
+    name: dev-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -1,0 +1,21 @@
+# Hostname routing example (CLAUDE.md, Gateway API section), now using the
+# real per-cluster domain now that cert-manager/local DNS exist (Milestone
+# 5, Phase 3) -- superseding the placeholder hostname Phase 2 used before
+# this was wired up. Per-cluster because the hostname genuinely differs
+# (dev vs prod domain); everything else about this route is identical to
+# prod's copy.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: template-test-1-hostname
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  hostnames:
+    - "template-test-1.dev.platform.local"
+  rules:
+    - backendRefs:
+        - name: template-test-1
+          namespace: template-test-1
+          port: 8080
