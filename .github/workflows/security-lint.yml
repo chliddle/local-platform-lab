@@ -7,8 +7,11 @@ name: security lint
 # future commit and a real regression. No path filter, deliberately --
 # zizmor runs in seconds, so there's no cost to always running it, and a
 # path filter is one more way a future change could slip past unchecked.
+#
+# No pull_request trigger either: this project's only collaborator is its
+# owner, so removing the trigger entirely means there's no path for
+# anyone else to run anything here at all.
 on:
-  pull_request: {}
   push:
     branches: [main]
   workflow_dispatch: {}

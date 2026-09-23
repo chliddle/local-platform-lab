@@ -1,13 +1,17 @@
 name: terraform CI
 
+# No pull_request trigger, deliberately: this project's only collaborator
+# is its owner (verified via the collaborators API), so a PR-triggered run
+# would only ever come from a stranger's fork -- removing the trigger
+# entirely means there's no path for anyone but the owner to run anything
+# here, rather than relying on GitHub's fork-PR sandboxing to bound what a
+# stranger's run could do.
 on:
-  pull_request:
-    paths:
-      - "terraform/**"
   push:
     branches: [main]
     paths:
       - "terraform/**"
+  workflow_dispatch: {}
 
 # No terraform apply here, on purpose: GitHub-hosted runners have no network
 # path to a Kind cluster running on a developer's laptop, so cluster
