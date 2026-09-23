@@ -110,8 +110,8 @@ KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status 
 # even the real Kubernetes control plane (kube-controller-manager,
 # kube-scheduler) lose leader election. One environment fully settled
 # before the next one starts is slower end to end but doesn't compound.
-echo "==> Waiting for every Application to be Synced+Healthy (can take several minutes on a fresh bootstrap -- chart/image pulls)"
-deadline=$((SECONDS + 900))
+echo "==> Waiting for every Application to be Synced+Healthy (can take a while on a fresh bootstrap -- chart/image pulls for everything at once)"
+deadline=$((SECONDS + 1800))
 while true; do
   app_names="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get applications -o jsonpath='{.items[*].metadata.name}')"
   not_ready=""

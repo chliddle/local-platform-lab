@@ -33,3 +33,14 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      # ARC's CRDs (AutoscalingRunnerSet/AutoscalingListener/
+      # EphemeralRunnerSet/EphemeralRunner) have large enough OpenAPI
+      # schemas that client-side apply's kubectl.kubernetes.io/
+      # last-applied-configuration annotation exceeds Kubernetes'
+      # 262144-byte annotation limit -- confirmed live on a from-scratch
+      # bootstrap (never hit before because management had never actually
+      # been torn down and recreated until this session). Server-side
+      # apply doesn't compute that annotation at all, so it doesn't hit
+      # the limit -- the fix the error message itself points at.
+      - ServerSideApply=true
