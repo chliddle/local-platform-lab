@@ -1,0 +1,22 @@
+name: self-hosted runner check
+
+# Milestone 4, Phase A checkpoint: proves a real job actually lands on the
+# self-hosted runner registered via ARC on the management cluster, and that
+# it only ever runs when triggered by hand -- never by pull_request, from
+# anyone. Throwaway: superseded by the real integration-test workflow in a
+# later phase.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: platform-runners
+    permissions:
+      contents: read
+    steps:
+      - name: Prove this ran on the self-hosted runner
+        run: |
+          echo "host: $(hostname)"
+          echo "user: $(whoami)"
+          echo "runner name: $RUNNER_NAME"
+          echo "runner os: $RUNNER_OS"

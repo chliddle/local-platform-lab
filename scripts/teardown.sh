@@ -3,14 +3,14 @@
 # (bootstrap.sh's merge step, undone) so stale contexts for a cluster that
 # no longer exists don't accumulate.
 #
-# Usage: scripts/teardown.sh [dev|prod]   (default: dev)
+# Usage: scripts/teardown.sh [dev|prod|management]   (default: dev)
 set -euo pipefail
 
 env_name="${1:-dev}"
 case "$env_name" in
-  dev | prod) ;;
+  dev | prod | management) ;;
   *)
-    echo "error: unknown environment '${env_name}' (expected dev or prod)" >&2
+    echo "error: unknown environment '${env_name}' (expected dev, prod, or management)" >&2
     exit 1
     ;;
 esac
