@@ -18,9 +18,16 @@ controller:
     requests:
       cpu: 100m
       memory: 256Mi
+    # 512Mi OOMKilled the controller live on a from-scratch bootstrap
+    # (confirmed via `kubectl describe pod`, Reason: OOMKilled) -- this
+    # cluster's Applications now include the full monitoring stack (ARC,
+    # BuildKit, kube-prometheus-stack, Loki, Tempo, OTel Collector,
+    # blackbox-exporter), and building its in-memory cache of everything
+    # it watches during the initial sync needs more headroom than the
+    # original Milestone 4 sizing (ARC/BuildKit alone) assumed.
     limits:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
   readinessProbe:
     timeoutSeconds: 5
     failureThreshold: 6
