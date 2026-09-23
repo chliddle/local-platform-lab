@@ -138,3 +138,17 @@ spec:
         - '.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]'
         - '.spec.conversion'
         - '.spec.versions[]?.selectableFields'
+    # Grafana's chart generates a fresh random admin-password on every
+    # render (no adminPassword pinned, no lookup()-based stability guard)
+    # -- confirmed live this made the Secret perpetually OutOfSync, and
+    # the Deployment along with it (a checksum/secret pod-template
+    # annotation ties a rollout to whatever the Secret's content is),
+    # causing an unnecessary Grafana restart on every single sync rather
+    # than just once at creation. The actual live password is unaffected
+    # by ignoring this -- it only stops Argo CD from computing a new
+    # desired value it would otherwise try to roll out every cycle.
+    - group: ""
+      kind: Secret
+      name: kube-prometheus-stack-grafana
+      jqPathExpressions:
+        - '.data["admin-password"]'
