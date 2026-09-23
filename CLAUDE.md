@@ -657,7 +657,7 @@ change, never write access to the platform repo for the app team.
 │
 ├── terraform/
 │   ├── modules/
-│   └── environments/     # dev, prod, and (Milestone 4) management
+│   └── environments/     # dev, prod, management
 │
 ├── scripts/
 │
@@ -701,12 +701,14 @@ app team never needs credentials scoped beyond their own repo.
 `tests/integration|synthetic|failure` from earlier drafts of this
 structure are superseded by each repo owning its own tests this way.
 Real cross-repo integration testing (does a platform change break an
-already-onboarded app, and vice versa) is deferred to Milestone 4: a
-throwaway-Kind-cluster version of this was tried and dropped (see git
-history) after repeatedly hitting Argo CD's reconciliation-timer lag on a
-cold cluster spun up fresh every run -- a cost of that specific model,
-not a real bug, and moot once self-hosted runners can test against the
-real, already-warm dev/prod clusters instead.
+already-onboarded app, and vice versa) is done: `ci-integration.yml`
+(this repo) asserts every app under `gitops/{dev,prod}/apps/` is actually
+Synced+Healthy in the real dev/prod clusters, running on the self-hosted
+runner from Milestone 4. A throwaway-Kind-cluster version of this was
+tried first (see git history) and dropped after repeatedly hitting Argo
+CD's reconciliation-timer lag on a cold cluster spun up fresh every run --
+a cost of that specific model, not a real bug, and resolved by testing
+against the real, already-warm clusters instead.
 
 ---
 
@@ -746,8 +748,8 @@ Wait for approval before performing significant architectural changes while oper
 
 Do not attempt to build the entire platform at once.
 
-**Status: Milestones 1-3 complete (Milestone 2 extended into a
-self-service multi-repo platform, below). Milestone 4 is next.**
+**Status: Milestones 1-4 complete (Milestone 2 extended into a
+self-service multi-repo platform, below). Milestone 5 is next.**
 
 ## Milestone 1 -- complete
 
@@ -850,29 +852,133 @@ workflow could reach.
 branch-protected, action-pinned, secret-scanned (GitHub push protection
 + local pre-commit), and Dependabot-enabled. GHCR packages stay private.
 
-## Milestone 4
+## Milestone 4 -- complete
 
-* dedicated management Kind cluster (not dev, not prod --
-  see GitHub Actions Runners)
-* self-hosted GitHub Actions runners (GitHub Actions Runner Controller)
-  for both the platform repo and self-service app repos, wired up per
-  Milestone 3's binding trigger constraint from the start
-* a rootless/daemonless image builder (BuildKit in rootless mode, or
-  Kaniko) for any workflow that builds a container image on a
-  self-hosted runner -- mounting the host's Docker socket or running a
-  privileged Docker-in-Docker sidecar are both well-known host-escape
-  vectors and are ruled out for this project
-* RBAC scoped to what runners actually need (e.g. reaching dev/prod's
-  Argo CD API for real integration testing), not broad cluster access
-* real cross-repo integration testing against the actual dev/prod
-  clusters (a platform change doesn't break an already-onboarded app,
-  and vice versa) -- a throwaway-Kind-cluster version of this was tried
-  first from GitHub-hosted runners and dropped (see Repository
-  Structure); testing against the real, already-warm clusters via
-  self-hosted runners avoids the reconciliation-timing problem that
-  killed that approach
-* documented security implications of CI compute sharing infra with
-  application workloads (the reason it's a separate cluster)
+* [x] dedicated management Kind cluster (`terraform/environments/management/`,
+  mirrors dev/prod's structure via the shared `kind-cluster` module) --
+  not dev, not prod (see GitHub Actions Runners)
+* [x] self-hosted GitHub Actions runner (GitHub Actions Runner Controller,
+  modern `gha-runner-scale-set` charts) for the platform repo, wired up
+  per Milestone 3's binding trigger constraint from the start -- verified
+  live that a real job lands on the runner via `workflow_dispatch`/`push`
+  and that no workflow anywhere has a `pull_request` trigger. Authenticated
+  via a fine-grained PAT (`Repository administration: Read and write`,
+  scoped to this one repo only) rather than a GitHub App -- functionally
+  equivalent permission either way; the App's shorter-lived token was
+  judged not worth the extra setup ceremony for a single-owner project
+  (see Security implications, below). Self-service app repos (Milestone 2)
+  don't have their own runner yet -- deferred as a fast-follow, since
+  nothing in this milestone's actual scope required it (see Security
+  implications)
+* [x] rootless BuildKit (`moby/buildkit:*-rootless`, pinned to a digest) as
+  a `Deployment`+`Service`+`NetworkPolicy` in the management cluster --
+  no Docker socket mount, no privileged Docker-in-Docker sidecar, ingress
+  restricted to the runner's own namespace. Verified live: a real
+  multi-arch (`linux/amd64`+`linux/arm64`) image built and pushed via
+  buildx's `remote` driver, no changes needed to the actual
+  `docker/build-push-action` step app repos already use -- only the
+  buildx driver setup changes, so wiring this into the app repos'
+  `ci.yml`/`release.yml` later is a small, low-risk change
+* [x] RBAC scoped to what the runner actually needs: a namespaced
+  `Role` in dev and prod granting `get/list/watch` on
+  `applications.argoproj.io` only (no secrets, no exec, no write verbs --
+  verified live that a delete attempt is rejected as `Forbidden`), and a
+  separate namespaced `Role` in the management cluster letting the
+  runner pod's own ServiceAccount read exactly the two credential Secrets
+  it needs (`dev-argocd-reader`, `prod-argocd-reader`), nothing else in
+  its namespace
+* [x] real cross-repo integration testing against the actual dev/prod
+  clusters (`ci-integration.yml`) -- verified live pulling real
+  Synced/Healthy status for every app in both environments. Supersedes
+  the throwaway-Kind-cluster version tried first from GitHub-hosted
+  runners and dropped after repeatedly hitting Argo CD's
+  reconciliation-timer lag on a cluster that's always cold (see
+  Repository Structure)
+* [x] documented security implications of CI compute sharing infra with
+  application workloads -- see below
+
+### Security implications
+
+This is the milestone where a public repo's CI first gets real compute
+and real network reach on the repo owner's own machine, so the questions
+below were checked empirically (live `docker inspect`, live RBAC tests
+against running clusters, live credential extraction and API calls) via
+two independent adversarial reviews with no prior context on the design,
+not assumed from the Terraform reading as intended.
+
+* **No path from any pod to the actual host filesystem.** Verified live
+  across all three Kind clusters (dev, prod, management): the only host
+  bind-mounts anywhere are `/lib/modules` (read-only) and Docker-managed
+  named volumes -- nothing mounts a macOS path, anywhere, in any cluster.
+  A full container breakout on a privileged Kind node (see below) lands
+  inside Docker Desktop's shared Linux VM, not on the real host; reaching
+  macOS itself would need a second, separate hypervisor escape that
+  nothing in this project's Kubernetes/Terraform configuration touches
+  either way -- that boundary is Docker Desktop's, not this platform's
+* **Kind nodes running privileged is pre-existing, not new here.** All
+  three Kind node containers (dev, prod, management) run `--privileged`
+  with unconfined seccomp/AppArmor -- verified identical across all
+  three. This is Kind's own architecture (nested containerd needs it),
+  true since Milestone 1, and not something this milestone made worse.
+  What this milestone actually changes is that a privileged node now
+  hosts pods reachable by an automated trigger (`push` to `main`) instead
+  of only by the owner's own `kubectl apply` -- which is exactly why the
+  Milestone 3 trigger constraint (no `pull_request`, ever) is binding
+  rather than advisory
+* **Rootless BuildKit's relaxed seccomp/AppArmor is the documented
+  upstream trade-off, not a local misconfiguration** -- verified the live
+  pod spec matches moby/buildkit's own reference Kubernetes manifest
+  exactly. Its safety model comes from the kernel's unprivileged
+  user-namespace mapping (a `RUN` step's "root" maps back to a real
+  non-root UID outside the build sandbox), not from seccomp filtering;
+  disabling seccomp/AppArmor removes a filtering layer that would
+  otherwise partially defend against a kernel 0-day in namespace
+  handling specifically -- a real but narrow residual risk, not a
+  configuration bug. The buildkitd endpoint itself has no auth of its
+  own (plain TCP); access control is entirely delegated to the
+  `NetworkPolicy` restricting ingress to the runner's namespace
+* **The runner pod carries no meaningful privilege of its own** --
+  verified live: no `hostPath`/`hostNetwork`/`hostPID`, no dind sidecar,
+  non-root by the image's own default, zero `ClusterRoleBindings`, and
+  exactly the two namespaced `Role`s described above
+* **Credential blast radius, checked against the live account/clusters,
+  not just the manifests:** the runner's PAT is confirmed scoped to this
+  one repo only (`403`/`404` against every other repo on the account) and
+  to `Administration` only -- confirmed it cannot push code directly
+  (a probe write was rejected needing `contents=write`, which this token
+  doesn't have). The one real escalation path is `Administration:write`
+  including deploy-key management, so a fully compromised management
+  cluster could add a push-capable deploy key -- but that already
+  requires first fully compromising the cluster, which independently
+  grants direct read of the dev/prod Argo CD tokens anyway; what it adds
+  beyond that is persistence in the platform repo's source past a
+  cluster wipe. The dev/prod reader credential was independently
+  confirmed live to be exactly as narrow as configured (`Forbidden` on
+  secrets, pods, and any write attempt)
+* **The actual widest-blast-radius credential in this whole platform
+  predates this milestone and lives outside it**: the classic PAT used
+  for Argo CD's git credential and the GHCR pull secret in dev/prod
+  (`TF_VAR_github_token`, sourced from `~/.zshrc`) carries `repo` +
+  `write:packages` -- full read/write on every repo on the account,
+  private ones included, far broader than the new runner PAT. Flagged
+  for future rescoping (now that all three repos are public, the `repo`
+  scope is likely obsolete -- anonymous HTTPS clone works for public
+  repos, only the GHCR pull half is still load-bearing and needs nothing
+  beyond `packages:read`); not fixed as part of this milestone since it
+  predates it and the user judged current risk acceptable for now
+* **No automated pre-merge check on an external PR's diff, by design.**
+  Since no workflow anywhere triggers on `pull_request` (Milestone 3),
+  `zizmor`/lint/tests only ever run post-merge (`push`). The owner's own
+  read-through before clicking merge is the actual, only defense against
+  a malicious external PR's content -- not a tooling backstop. This is
+  the accepted cost of removing the automated-trigger attack surface
+  entirely rather than merely bounding it
+* **Container IPs used for cross-cluster access aren't stable.**
+  `scripts/sync-runner-creds.sh` resolves dev/prod's control-plane
+  container IP on the shared `kind` Docker network at write time; Docker
+  doesn't guarantee the same IP across `kind delete`/`create`, so this
+  script must be re-run after recreating dev, prod, or management, or
+  `ci-integration.yml` will fail against a stale address
 
 ## Milestone 5
 
