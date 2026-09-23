@@ -7,10 +7,24 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: https://github.com/chliddle/local-platform-lab.git
-    targetRevision: main
-    path: gitops/prod/platform
+  # Multiple sources, combined into one sync -- see root-platform-dev.yaml
+  # for the shared-vs-per-cluster rationale.
+  #
+  # targetRevision: prod, not main -- this is prod's promotion gate.
+  # main is where dev-track changes land (see root-platform-dev.yaml and
+  # gitops/dev/apps' root-app, both still on main); a change only reaches
+  # this branch once .github/workflows/promote-platform.yml has verified
+  # every Application in dev's own argocd namespace (not just the platform
+  # ones -- a real "did this break dev" check, not just "did the infra
+  # components themselves come up") is Synced+Healthy, and fast-forwards
+  # this branch to that commit automatically.
+  sources:
+    - repoURL: https://github.com/chliddle/local-platform-lab.git
+      targetRevision: prod
+      path: platform/gitops-platform-apps
+    - repoURL: https://github.com/chliddle/local-platform-lab.git
+      targetRevision: prod
+      path: gitops/prod/platform
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

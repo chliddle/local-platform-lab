@@ -28,6 +28,7 @@ def main():
         + sorted(glob.glob("gitops/dev/platform/*.yaml"))
         + sorted(glob.glob("gitops/prod/platform/*.yaml"))
         + sorted(glob.glob("gitops/management/platform/*.yaml"))
+        + sorted(glob.glob("platform/gitops-platform-apps/*.yaml"))
     )
 
     for path in files:

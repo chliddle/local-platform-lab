@@ -23,15 +23,18 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-  # istiod patches this webhook's caBundle at runtime (it has to -- the
-  # chart renders it empty since the CA cert doesn't exist yet at install
-  # time), so it always drifts from the git-rendered manifest. Verified
-  # live and confirmed as this exact, well-known Istio+Argo CD pattern,
-  # not a real config problem -- ignored rather than fought with selfHeal
-  # perpetually overwriting istiod's own runtime-issued CA bundle.
+  # istiod patches this webhook's caBundle AND flips failurePolicy
+  # Ignore->Fail at runtime once it's confirmed healthy (both render as
+  # the chart's safe defaults at install time, before istiod exists to
+  # patch them), so both fields always drift from the git-rendered
+  # manifest. Verified live (diffed the live object against a fresh `helm
+  # template` render) and confirmed as this exact, well-known Istio+Argo CD
+  # pattern, not a real config problem -- ignored rather than fought with
+  # selfHeal perpetually overwriting istiod's own runtime-managed state.
   ignoreDifferences:
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
       name: istiod-default-validator
       jqPathExpressions:
         - '.webhooks[]?.clientConfig.caBundle'
+        - '.webhooks[]?.failurePolicy'
