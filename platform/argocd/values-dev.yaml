@@ -12,6 +12,7 @@ controller:
       cpu: 100m
       memory: 256Mi
     limits:
+      cpu: 200m
       memory: 512Mi
 
 repoServer:
@@ -19,7 +20,13 @@ repoServer:
     requests:
       cpu: 50m
       memory: 128Mi
+    # cpu limit (Milestone 5, Phase 4): confirmed live on the management
+    # cluster that an uncapped repo-server can burst to 300%+ CPU rendering
+    # a few charts at once and starve the API server on the shared Docker
+    # Desktop VM all three Kind clusters run on -- same risk here whenever
+    # Istio/cert-manager/Gateway API resync together.
     limits:
+      cpu: 300m
       memory: 256Mi
 
 server:
@@ -28,6 +35,7 @@ server:
       cpu: 50m
       memory: 128Mi
     limits:
+      cpu: 100m
       memory: 256Mi
 
 applicationSet:

@@ -7,6 +7,11 @@
 configs:
   params:
     server.insecure: true
+    # Caps concurrent chart renders -- a fresh bootstrap (or this Phase 4
+    # rollout) creates several Applications at once, and unbounded
+    # parallelism is what OOMKilled the repo-server live (see repoServer's
+    # memory limit comment below).
+    reposerver.parallelism.limit: "2"
 
 controller:
   resources:
@@ -14,15 +19,26 @@ controller:
       cpu: 100m
       memory: 256Mi
     limits:
+      cpu: 200m
       memory: 512Mi
 
 repoServer:
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
+      cpu: 100m
       memory: 256Mi
+    # Milestone 5, Phase 4: 256Mi OOMKilled the repo-server live, confirmed
+    # via `kubectl describe pod` (Reason: OOMKilled) -- rendering several
+    # large charts at once (kube-prometheus-stack alone is sizeable) needs
+    # real headroom, on top of dev/prod's already-larger Istio/cert-manager
+    # charts this cluster doesn't even have. cpu limit added at the same
+    # time: no cap on this at all is what let a handful of concurrent
+    # `helm template` renders burst to 300%+ CPU on the shared Docker
+    # Desktop VM and starve the API server (confirmed live via
+    # readiness/liveness probe timeouts across every Argo CD component).
+    limits:
+      cpu: 500m
+      memory: 768Mi
 
 server:
   resources:
@@ -30,6 +46,7 @@ server:
       cpu: 50m
       memory: 128Mi
     limits:
+      cpu: 100m
       memory: 256Mi
 
 applicationSet:

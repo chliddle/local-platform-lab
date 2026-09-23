@@ -1,0 +1,79 @@
+# Synthetic HTTPS probes against the real *.platform.local endpoints Phase 3
+# stood up. The management cluster can't resolve *.platform.local (that's a
+# macOS-host-only /etc/resolver override, scripts/setup-local-dns.sh) or
+# trust dev/prod's per-cluster self-signed CAs by default, so each target is
+# probed by IP directly with the hostname/cert validation supplied by the
+# module config instead of DNS: `target` is the Gateway's LoadBalancer IP,
+# and the module's http.headers.Host + tls_config.server_name make it a
+# correct, fully-validated request for that hostname (no insecure_skip_verify
+# -- CLAUDE.md's Synthetic Monitoring section explicitly wants "TLS
+# availability" actually validated, not bypassed).
+#
+# The two root CAs (dev, prod) are mounted from a Secret
+# scripts/sync-monitoring-targets.sh writes -- same reason as always: only a
+# script can see the live, per-cluster values (here, the CA cert content
+# itself, freshly generated on every cluster recreate).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox-exporter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    targetRevision: "11.18.0"
+    helm:
+      releaseName: blackbox-exporter
+      valuesObject:
+        fullnameOverride: blackbox-exporter
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          # Explicit limit, not just a request -- see kube-prometheus-
+          # stack.yaml's comment for why this matters on the shared VM.
+          limits:
+            cpu: 50m
+            memory: 64Mi
+        extraSecretMounts:
+          - name: target-cas
+            mountPath: /etc/blackbox/certs
+            secretName: blackbox-target-cas
+            readOnly: true
+        config:
+          modules:
+            https_dev:
+              prober: http
+              timeout: 5s
+              http:
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                preferred_ip_protocol: "ip4"
+                headers:
+                  Host: template-test-1.dev.platform.local
+                tls_config:
+                  server_name: template-test-1.dev.platform.local
+                  ca_file: /etc/blackbox/certs/dev-ca.crt
+            https_prod:
+              prober: http
+              timeout: 5s
+              http:
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                preferred_ip_protocol: "ip4"
+                headers:
+                  Host: template-test-1.prod.platform.local
+                tls_config:
+                  server_name: template-test-1.prod.platform.local
+                  ca_file: /etc/blackbox/certs/prod-ca.crt
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

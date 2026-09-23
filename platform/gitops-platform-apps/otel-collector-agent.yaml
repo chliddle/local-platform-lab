@@ -1,0 +1,103 @@
+# Per-node collector for dev/prod -- collects metrics, logs, AND traces
+# locally and pushes all three to management's central OTel Collector
+# (gitops/management/platform/otel-collector.yaml) over the shared kind
+# Docker network, which fans out to Prometheus/Loki/Tempo. One collector
+# technology everywhere (this Application and the central one are the same
+# chart, different mode/config), replacing node-exporter/kube-state-metrics
+# entirely -- no more Prometheus pull-scraping across clusters, just push,
+# consistent with how logs/traces already worked.
+#
+# -contrib image, not core: confirmed live via `otelcol validate` that the
+# core image's receiver set doesn't include filelog or k8s_cluster (only
+# hostmetrics is in core) -- core is missing exactly the two components
+# logsCollection and clusterMetrics need.
+#
+# DaemonSet, not Deployment: filelog/hostmetrics read each node's local
+# /var/log and /proc -- one pod per node, not a cluster-wide puller.
+# clusterMetrics's k8s_cluster receiver uses leader election automatically
+# when running as a DaemonSet (chart's own documented behavior, avoids
+# duplicate cluster-level metrics if this ever runs >1 node). All four
+# presets wire their own required hostPath mounts and RBAC automatically,
+# no manual volume/ClusterRole config needed here.
+#
+# OTLP_ENDPOINT comes from the management-endpoints ConfigMap
+# scripts/sync-monitoring-targets.sh writes into this cluster -- the
+# central collector's container IP and NodePort aren't stable across `kind
+# delete`/`create` (same reasoning as every other cross-cluster address in
+# this project), so they can't be committed as a literal endpoint here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector-agent
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: "0.173.1"
+    helm:
+      releaseName: otel-collector-agent
+      valuesObject:
+        mode: daemonset
+        fullnameOverride: otel-collector-agent
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        resources:
+          requests:
+            cpu: 25m
+            memory: 96Mi
+          # Explicit limit, not just a request -- confirmed live that
+          # requests alone don't stop a busy pod from starving the shared
+          # Docker Desktop VM all three Kind clusters run on.
+          limits:
+            cpu: 100m
+            memory: 192Mi
+        extraEnvsFrom:
+          - configMapRef:
+              name: management-endpoints
+        presets:
+          logsCollection:
+            enabled: true
+          kubernetesAttributes:
+            enabled: true
+          hostMetrics:
+            enabled: true
+          clusterMetrics:
+            enabled: true
+        config:
+          # Self-telemetry: chart default scrapes every 10s, needless
+          # resolution for this lab's own internal metrics.
+          receivers:
+            prometheus:
+              config:
+                scrape_configs:
+                  - job_name: opentelemetry-collector
+                    scrape_interval: 60s
+                    static_configs:
+                      - targets: ["${env:MY_POD_IP}:8888"]
+          exporters:
+            otlp/central:
+              endpoint: ${env:OTLP_ENDPOINT}
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              logs:
+                exporters:
+                  - otlp/central
+              traces:
+                exporters:
+                  - otlp/central
+              metrics:
+                exporters:
+                  - otlp/central
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

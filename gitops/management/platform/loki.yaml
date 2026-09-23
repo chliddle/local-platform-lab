@@ -1,0 +1,83 @@
+# Single-binary/filesystem Loki -- simplest mode for a lab (no MinIO/object
+# storage, no separate read/write/backend scale-out components). Not
+# exposed cross-cluster: only otel-collector.yaml talks to it, over
+# in-cluster Service DNS -- dev/prod's OTel Collector agents send logs to
+# the central collector, not directly to Loki.
+#
+# sync-wave 1: no hard dependency on kube-prometheus-stack's CRDs, but kept
+# alongside the other wave-1 monitoring components for a consistent "core
+# platform first, everything else after" ordering.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: "7.3.0"
+    helm:
+      releaseName: loki
+      valuesObject:
+        deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          commonConfig:
+            replication_factor: 1
+          storage:
+            type: filesystem
+          # Chart's own documented "for testing or playing around" schema
+          # shortcut -- a real filesystem-backed TSDB schema without having
+          # to hand-write schemaConfig.
+          useTestSchema: true
+        singleBinary:
+          replicas: 1
+          persistence:
+            enabled: true
+            size: 2Gi
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            # Explicit limit, not just a request -- see kube-prometheus-
+            # stack.yaml's comment for why this matters on the shared VM.
+            limits:
+              cpu: 150m
+              memory: 256Mi
+        # Simple-scalable-mode components -- unused in SingleBinary mode.
+        read:
+          replicas: 0
+        write:
+          replicas: 0
+        backend:
+          replicas: 0
+        # nginx in front of the query/push API -- Grafana and the OTel
+        # Collector both talk to the singleBinary Service directly instead.
+        gateway:
+          enabled: false
+        test:
+          enabled: false
+        monitoring:
+          selfMonitoring:
+            enabled: false
+        lokiCanary:
+          enabled: false
+        # memcached-backed chunk/results caching -- unnecessary overhead at
+        # this scale and retention.
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

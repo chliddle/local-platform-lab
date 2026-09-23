@@ -25,16 +25,19 @@ echo "==> [2/7] Bootstrapping dev cluster"
 echo "==> [3/7] Bootstrapping prod cluster"
 "${repo_root}/scripts/bootstrap.sh" prod
 
-echo "==> [4/7] Syncing dev/prod Argo CD read credentials into management"
+echo "==> [4/8] Syncing dev/prod Argo CD read credentials into management"
 "${repo_root}/scripts/sync-runner-creds.sh"
 
-echo "==> [5/7] Checking Mac -> cluster network routing"
+echo "==> [5/8] Syncing cross-cluster monitoring targets (scrape configs, CAs, endpoints)"
+"${repo_root}/scripts/sync-monitoring-targets.sh"
+
+echo "==> [6/8] Checking Mac -> cluster network routing"
 "${repo_root}/scripts/setup-mac-networking.sh"
 
-echo "==> [6/7] Setting up local DNS (*.dev.platform.local, *.prod.platform.local)"
+echo "==> [7/8] Setting up local DNS (*.dev.platform.local, *.prod.platform.local)"
 "${repo_root}/scripts/setup-local-dns.sh"
 
-echo "==> [7/7] Trusting both clusters' local CAs"
+echo "==> [8/8] Trusting both clusters' local CAs"
 "${repo_root}/scripts/trust-local-ca.sh"
 
 cat <<'EOF'

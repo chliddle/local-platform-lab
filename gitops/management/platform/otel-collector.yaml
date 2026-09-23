@@ -1,0 +1,114 @@
+# Central OTLP ingress point for the whole platform AND this cluster's own
+# collector, both at once: every cluster's OTel Collector (dev/prod's
+# platform/gitops-platform-apps/otel-collector-agent.yaml, and this one's
+# own local presets below) collects metrics/logs/traces and pushes here --
+# either over the loopback-local pipeline (this cluster) or this Service's
+# NodePort (dev/prod, over the shared kind Docker network) -- and it fans
+# out: metrics to Prometheus, logs to Loki, traces to Tempo, all over
+# in-cluster Service DNS. One collector technology everywhere, one push
+# mechanism for everything, replacing the old Prometheus pull-scrape
+# entirely -- no more per-cluster node-exporter/kube-state-metrics.
+#
+# -contrib image, not core: confirmed live via `otelcol validate` that the
+# core image's receiver set doesn't include filelog or k8s_cluster (only
+# hostmetrics is in core) -- core is missing exactly what logsCollection
+# and clusterMetrics need. Same image/config shape as
+# otel-collector-agent.yaml, this one just ALSO fans out to the backends.
+#
+# DaemonSet, not Deployment: filelog/hostmetrics read this node's local
+# /var/log and /proc -- functionally identical to a 1-replica Deployment on
+# this single-node cluster, but semantically the right controller type.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: "0.173.1"
+    helm:
+      releaseName: otel-collector
+      valuesObject:
+        mode: daemonset
+        fullnameOverride: otel-collector
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        service:
+          type: NodePort
+        resources:
+          requests:
+            cpu: 75m
+            memory: 160Mi
+          # Explicit limit, not just a request -- see kube-prometheus-
+          # stack.yaml's comment for why this matters on the shared VM.
+          # useGOMEMLIMIT (chart default: true) sets GOMEMLIMIT from this,
+          # so the Go runtime actually respects it. Sized a bit above the
+          # dev/prod agent: this one also fans out to three backends.
+          limits:
+            cpu: 200m
+            memory: 320Mi
+        presets:
+          logsCollection:
+            enabled: true
+          kubernetesAttributes:
+            enabled: true
+          hostMetrics:
+            enabled: true
+          clusterMetrics:
+            enabled: true
+        config:
+          # Self-telemetry: chart default scrapes every 10s, needless
+          # resolution for this lab's own internal metrics.
+          receivers:
+            prometheus:
+              config:
+                scrape_configs:
+                  - job_name: opentelemetry-collector
+                    scrape_interval: 60s
+                    static_configs:
+                      - targets: ["${env:MY_POD_IP}:8888"]
+          exporters:
+            debug: {}
+            otlp/tempo:
+              endpoint: tempo.monitoring.svc.cluster.local:4317
+              tls:
+                insecure: true
+            # Loki 3.x's and Prometheus 3.x's native OTLP ingestion
+            # endpoints -- plain otlphttp, no vendor-specific exporter or
+            # remote-write plugin needed.
+            otlphttp/loki:
+              endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
+              tls:
+                insecure: true
+            otlphttp/prometheus:
+              endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              traces:
+                exporters:
+                  - debug
+                  - otlp/tempo
+              logs:
+                exporters:
+                  - debug
+                  - otlphttp/loki
+              metrics:
+                exporters:
+                  - debug
+                  - otlphttp/prometheus
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

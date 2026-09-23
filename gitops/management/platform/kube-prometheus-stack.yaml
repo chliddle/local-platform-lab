@@ -1,0 +1,111 @@
+# Prometheus + Alertmanager + Grafana for the whole platform, centralized
+# on the management cluster (CLAUDE.md's stated intent for Milestone 7,
+# pulled forward into Milestone 5) -- not duplicated per cluster. Metrics
+# arrive via OTLP push from every cluster's OTel Collector (this cluster's
+# own gitops/management/platform/otel-collector.yaml, and dev/prod's
+# platform/gitops-platform-apps/otel-collector-agent.yaml), not Prometheus
+# pull-scraping -- kubeStateMetrics/nodeExporter are disabled below because
+# the OTel Collector's hostMetrics/clusterMetrics presets replace them
+# uniformly on all three clusters, one collection mechanism instead of two.
+#
+# No storage/PVCs: Prometheus/Alertmanager/Grafana all run on ephemeral
+# emptyDir with short retention -- a deliberate lab-scale choice given the
+# Docker Desktop VM disk-full incident from Milestone 4 (CLAUDE.md's
+# "Lessons Learned"); losing metrics history on a pod restart is an
+# acceptable tradeoff here, unbounded disk growth is not.
+#
+# Grafana's admin password is chart-generated (kubectl get secret -n
+# monitoring kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}'
+# | base64 -d) -- same pattern this project already uses for Argo CD's own
+# initial admin secret, no new credential-management mechanism needed.
+#
+# Every component gets an explicit CPU *limit*, not just a request --
+# confirmed live this session that requests alone don't help: the shared
+# Docker Desktop VM (single pool for all three Kind clusters) hit real CPU
+# contention (300%+ per container, host load average >15 on a 14-CPU VM)
+# from a handful of components bursting unbounded during their initial
+# reconcile, which cascaded into API server timeouts. 60s scrape/evaluation
+# interval (chart default is stricter) -- this lab has nothing that needs
+# sub-minute metric resolution.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: "91.5.0"
+    helm:
+      releaseName: kube-prometheus-stack
+      valuesObject:
+        prometheus:
+          prometheusSpec:
+            retention: 24h
+            scrapeInterval: 60s
+            evaluationInterval: 60s
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 250m
+                memory: 512Mi
+            # Prometheus 3.x's native OTLP metrics receiver -- same "push,
+            # not pull" pattern as Loki's native OTLP log ingestion.
+            enableFeatures:
+              - otlp-write-receiver
+        alertmanager:
+          alertmanagerSpec:
+            resources:
+              requests:
+                cpu: 25m
+                memory: 32Mi
+              limits:
+                cpu: 50m
+                memory: 64Mi
+        prometheusOperator:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+        grafana:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 150m
+              memory: 192Mi
+          # Loki + Tempo live in this same cluster (loki.yaml, tempo.yaml)
+          # -- plain in-cluster Service DNS, no dynamic-IP problem here.
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki.monitoring.svc.cluster.local:3100
+              access: proxy
+            - name: Tempo
+              type: tempo
+              url: http://tempo.monitoring.svc.cluster.local:3200
+              access: proxy
+        # Replaced by the OTel Collector's hostMetrics/clusterMetrics
+        # presets (this cluster's own otel-collector.yaml runs them too),
+        # pushed via OTLP above instead of scraped.
+        kubeStateMetrics:
+          enabled: false
+        nodeExporter:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
