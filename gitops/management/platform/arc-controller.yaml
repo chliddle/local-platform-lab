@@ -13,8 +13,14 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts
-    chart: gha-runner-scale-set-controller
+    # Argo CD (v3.5.3, this cluster) resolves an OCI Helm source's tag/digest
+    # against `repoURL` alone -- a separate `chart:` field is NOT appended to
+    # it here, unlike a registered Repository-prefix setup. Verified live:
+    # a repoURL/chart split (matching Terraform's own helm_release fields)
+    # made the repo-server query the wrong path (missing the chart-name
+    # suffix) and get a 403 from GHCR's token endpoint. The full chart path
+    # in repoURL, no separate chart field, is what actually works.
+    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
     targetRevision: "0.14.2"
     helm:
       releaseName: arc

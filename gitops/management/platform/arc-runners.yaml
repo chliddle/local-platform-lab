@@ -22,8 +22,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts
-    chart: gha-runner-scale-set
+    # See arc-controller.yaml for why this is the full chart path in
+    # repoURL rather than a repoURL/chart split.
+    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
     targetRevision: "0.14.2"
     helm:
       releaseName: platform-runners
