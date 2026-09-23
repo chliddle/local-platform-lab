@@ -45,3 +45,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+  # Same caBundle-drift pattern as istio-base.yaml's ignoreDifferences, on
+  # this chart's own sidecar-injection webhook.
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: istio-validator-istio-system
+      jqPathExpressions:
+        - '.webhooks[]?.clientConfig.caBundle'
