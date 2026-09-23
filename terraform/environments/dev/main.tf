@@ -131,3 +131,62 @@ resource "terraform_data" "argocd_root_app" {
 
   depends_on = [helm_release.argocd, kubernetes_secret_v1.argocd_repo_creds]
 }
+
+# Milestone 4, Phase C: lets the management cluster's self-hosted CI runner
+# query Argo CD Application sync/health status here for real cross-repo
+# integration testing (does a platform change break an already-onboarded
+# app, and vice versa) -- read-only on exactly one resource type, nothing
+# else. No exec, no secrets, no write verbs.
+resource "kubernetes_service_account_v1" "ci_argocd_reader" {
+  metadata {
+    name      = "ci-argocd-reader"
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+  }
+}
+
+resource "kubernetes_role_v1" "ci_argocd_reader" {
+  metadata {
+    name      = "ci-argocd-reader"
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+  }
+
+  rule {
+    api_groups = ["argoproj.io"]
+    resources  = ["applications"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+resource "kubernetes_role_binding_v1" "ci_argocd_reader" {
+  metadata {
+    name      = "ci-argocd-reader"
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role_v1.ci_argocd_reader.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account_v1.ci_argocd_reader.metadata[0].name
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+  }
+}
+
+# Kubernetes 1.24+ no longer auto-creates a long-lived token Secret for a
+# ServiceAccount -- create one explicitly so scripts/sync-runner-creds.sh
+# (run from the host, outside any cluster) has a durable token to read.
+resource "kubernetes_secret_v1" "ci_argocd_reader_token" {
+  metadata {
+    name      = "ci-argocd-reader-token"
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+    annotations = {
+      "kubernetes.io/service-account.name" = kubernetes_service_account_v1.ci_argocd_reader.metadata[0].name
+    }
+  }
+
+  type = "kubernetes.io/service-account-token"
+}
