@@ -16,9 +16,14 @@ REQUIRED_FIELDS = ["apiVersion", "kind", "metadata", "spec"]
 
 def main():
     files = (
-        ["platform/argocd/root-app.yaml", "platform/argocd/root-app-prod.yaml"]
+        [
+            "platform/argocd/root-app.yaml",
+            "platform/argocd/root-app-prod.yaml",
+            "platform/argocd/root-platform-management.yaml",
+        ]
         + sorted(glob.glob("gitops/dev/apps/*.yaml"))
         + sorted(glob.glob("gitops/prod/apps/*.yaml"))
+        + sorted(glob.glob("gitops/management/platform/*.yaml"))
     )
 
     for path in files:

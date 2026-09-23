@@ -5,21 +5,72 @@ module "kind" {
   kubeconfig_output_path = "${abspath(path.module)}/kubeconfig-${var.cluster_name}"
 }
 
+resource "kubernetes_namespace_v1" "argocd" {
+  metadata {
+    name = "argocd"
+  }
+}
+
+# Milestone 5, Phase 1: this cluster's own platform tooling (ARC, BuildKit,
+# and later the observability stack) is GitOps-managed like everything in
+# dev/prod, not raw-Terraform-managed -- Argo CD itself is the one
+# exception, installed directly for the same chicken-and-egg reason dev/prod
+# install it directly (it can't deploy itself before it exists).
+resource "helm_release" "argocd" {
+  name       = "argocd"
+  namespace  = kubernetes_namespace_v1.argocd.metadata[0].name
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argo-cd"
+  version    = var.argocd_chart_version
+
+  values = [file("${path.module}/../../../platform/argocd/values-management.yaml")]
+}
+
+# Same repo-creds credential TEMPLATE dev/prod use (matched by URL prefix,
+# so it already covers this platform repo's gitops/management/platform
+# path with zero further changes). github_username/github_token reuse the
+# same TF_VAR_github_username/TF_VAR_github_token already exported for
+# dev/prod -- Terraform env vars aren't per-module, so no new .env.local
+# entries are needed.
+resource "kubernetes_secret_v1" "argocd_repo_creds" {
+  metadata {
+    name      = "github-repo-creds"
+    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+    labels = {
+      "argocd.argoproj.io/secret-type" = "repo-creds"
+    }
+  }
+
+  data = {
+    type     = "git"
+    url      = var.github_org_url
+    username = var.github_username
+    password = var.github_token
+  }
+
+  depends_on = [helm_release.argocd]
+}
+
+# Applied via kubectl apply local-exec, not a Terraform Kubernetes-manifest
+# provider -- same reasoning as terraform_data.argocd_root_app in dev/prod
+# (the Application CRD doesn't exist until helm_release.argocd finishes).
+resource "terraform_data" "argocd_root_platform" {
+  triggers_replace = [
+    filesha256("${path.module}/../../../platform/argocd/root-platform-management.yaml"),
+    module.kind.instance_id,
+  ]
+
+  provisioner "local-exec" {
+    command = "kubectl --kubeconfig '${module.kind.kubeconfig_path}' apply -f '${path.module}/../../../platform/argocd/root-platform-management.yaml'"
+  }
+
+  depends_on = [helm_release.argocd, kubernetes_secret_v1.argocd_repo_creds]
+}
+
 resource "kubernetes_namespace_v1" "arc_systems" {
   metadata {
     name = "arc-systems"
   }
-}
-
-# The controller: manages the AutoscalingRunnerSet/AutoscalingListener/
-# EphemeralRunnerSet/EphemeralRunner CRDs. No GitHub credential of its own --
-# each scale set release below carries its own repo-scoped credential.
-resource "helm_release" "arc_controller" {
-  name       = "arc"
-  namespace  = kubernetes_namespace_v1.arc_systems.metadata[0].name
-  repository = "oci://ghcr.io/actions/actions-runner-controller-charts"
-  chart      = "gha-runner-scale-set-controller"
-  version    = var.arc_chart_version
 }
 
 resource "kubernetes_namespace_v1" "arc_runners" {
@@ -42,32 +93,6 @@ resource "kubernetes_secret_v1" "platform_runner_github_credential" {
   data = {
     github_token = var.arc_runner_pat
   }
-}
-
-# containerMode is deliberately left unset: the default bare-runner-pod
-# template has no dind sidecar, no Docker socket, and no extra RBAC bound to
-# the runner pods themselves. Container image builds go out over the
-# network to a rootless BuildKit Service instead (Phase B) -- mounting the
-# host's Docker socket or a privileged DinD sidecar are both known
-# host-escape vectors and are ruled out for this project (CLAUDE.md,
-# Milestone 4).
-resource "helm_release" "platform_runners" {
-  name       = "platform-runners"
-  namespace  = kubernetes_namespace_v1.arc_runners.metadata[0].name
-  repository = "oci://ghcr.io/actions/actions-runner-controller-charts"
-  chart      = "gha-runner-scale-set"
-  version    = var.arc_chart_version
-
-  values = [yamlencode({
-    githubConfigUrl    = "https://github.com/chliddle/local-platform-lab"
-    githubConfigSecret = kubernetes_secret_v1.platform_runner_github_credential.metadata[0].name
-    runnerScaleSetName = "platform-runners"
-    minRunners         = 0
-    # Single Docker host, no concurrency headroom to give away.
-    maxRunners = 1
-  })]
-
-  depends_on = [helm_release.arc_controller]
 }
 
 # Milestone 4, Phase D: lets runner pods read exactly the two credential
@@ -111,142 +136,15 @@ resource "kubernetes_role_binding_v1" "runner_reads_argocd_creds" {
   }
 }
 
-# Rootless, daemonless image builder. Mounting the host's Docker socket or
-# running a privileged Docker-in-Docker sidecar are both well-known
-# host-escape vectors and are ruled out for this project (CLAUDE.md,
-# Milestone 4) -- runner pods build images by talking to this Service over
-# the network instead (buildx's `remote` driver, wired up in the workflow
-# itself). Manifest follows moby/buildkit's own reference Kubernetes
-# example (examples/kubernetes/deployment+service.rootless.yaml), pinned to
-# a digest rather than a floating tag.
+# Rootless, daemonless image builder -- runner pods build images by talking
+# to it over the network instead (buildx's `remote` driver, wired up in the
+# workflow itself). Namespace stays Terraform-managed (no credential lives
+# here, but this keeps it symmetric with arc-systems/arc-runners rather than
+# a special case); the Deployment/Service/NetworkPolicy themselves are
+# GitOps-managed as of Milestone 5, Phase 1 -- see
+# gitops/management/platform/buildkit.yaml and platform/buildkit/.
 resource "kubernetes_namespace_v1" "buildkit" {
   metadata {
     name = "buildkit"
-  }
-}
-
-resource "kubernetes_deployment_v1" "buildkitd" {
-  metadata {
-    name      = "buildkitd"
-    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
-  }
-
-  spec {
-    replicas = 1
-
-    selector {
-      match_labels = {
-        app = "buildkitd"
-      }
-    }
-
-    template {
-      metadata {
-        labels = {
-          app = "buildkitd"
-        }
-        annotations = {
-          "container.apparmor.security.beta.kubernetes.io/buildkitd" = "unconfined"
-        }
-      }
-
-      spec {
-        container {
-          name  = "buildkitd"
-          image = "moby/buildkit:v0.33.0-rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef"
-
-          args = [
-            "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock",
-            "--addr", "tcp://0.0.0.0:1234",
-            "--oci-worker-no-process-sandbox",
-          ]
-
-          port {
-            container_port = 1234
-          }
-
-          security_context {
-            run_as_user  = 1000
-            run_as_group = 1000
-            seccomp_profile {
-              type = "Unconfined"
-            }
-          }
-
-          readiness_probe {
-            exec {
-              command = ["buildctl", "debug", "workers"]
-            }
-            initial_delay_seconds = 5
-            period_seconds        = 30
-          }
-
-          liveness_probe {
-            exec {
-              command = ["buildctl", "debug", "workers"]
-            }
-            initial_delay_seconds = 5
-            period_seconds        = 30
-          }
-        }
-      }
-    }
-  }
-}
-
-resource "kubernetes_service_v1" "buildkitd" {
-  metadata {
-    name      = "buildkitd"
-    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
-  }
-
-  spec {
-    type = "ClusterIP"
-
-    selector = {
-      app = "buildkitd"
-    }
-
-    port {
-      port        = 1234
-      target_port = 1234
-    }
-  }
-}
-
-# BuildKit executes arbitrary Dockerfile instructions with no auth of its
-# own -- restricting ingress to pods in the arc-runners namespace (the only
-# pods that should ever be building images) keeps a compromised pod
-# elsewhere in this cluster from reaching it. Matched via the namespace's
-# built-in kubernetes.io/metadata.name label (auto-set since Kubernetes
-# 1.21), not a hand-applied label that could drift.
-resource "kubernetes_network_policy_v1" "buildkitd" {
-  metadata {
-    name      = "buildkitd-allow-runners-only"
-    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
-  }
-
-  spec {
-    pod_selector {
-      match_labels = {
-        app = "buildkitd"
-      }
-    }
-
-    ingress {
-      from {
-        namespace_selector {
-          match_labels = {
-            "kubernetes.io/metadata.name" = kubernetes_namespace_v1.arc_runners.metadata[0].name
-          }
-        }
-      }
-      ports {
-        port     = 1234
-        protocol = "TCP"
-      }
-    }
-
-    policy_types = ["Ingress"]
   }
 }

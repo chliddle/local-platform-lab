@@ -1,0 +1,27 @@
+# The ARC controller: manages the AutoscalingRunnerSet/AutoscalingListener/
+# EphemeralRunnerSet/EphemeralRunner CRDs and their Deployments. No GitHub
+# credential of its own -- arc-runners.yaml carries the repo-scoped one.
+# `helm.releaseName: arc` matches the release name this chart was
+# originally installed under via Terraform (Milestone 4), so migrating
+# ownership from Terraform to Argo CD re-applies the exact same computed
+# resource names rather than creating parallel ones.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-controller
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts
+    chart: gha-runner-scale-set-controller
+    targetRevision: "0.14.2"
+    helm:
+      releaseName: arc
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

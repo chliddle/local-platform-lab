@@ -1,0 +1,43 @@
+# containerMode is deliberately left unset: the default bare-runner-pod
+# template has no dind sidecar, no Docker socket, and no extra RBAC bound to
+# the runner pods themselves. Container image builds go out over the
+# network to rootless BuildKit (buildkit.yaml) instead -- mounting the
+# host's Docker socket or a privileged DinD sidecar are both known
+# host-escape vectors and are ruled out for this project (CLAUDE.md,
+# Milestone 4). `githubConfigSecret` references the same
+# platform-runner-github-credential Secret Terraform still creates
+# directly (never committed, never GitOps-managed).
+#
+# sync-wave 1: the AutoscalingRunnerSet CRD this chart's release depends on
+# is only installed once arc-controller.yaml (wave 0, the default) has
+# synced -- same ordering `depends_on = [helm_release.arc_controller]`
+# encoded in Terraform before this migration.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-runners
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: oci://ghcr.io/actions/actions-runner-controller-charts
+    chart: gha-runner-scale-set
+    targetRevision: "0.14.2"
+    helm:
+      releaseName: platform-runners
+      valuesObject:
+        githubConfigUrl: https://github.com/chliddle/local-platform-lab
+        githubConfigSecret: platform-runner-github-credential
+        runnerScaleSetName: platform-runners
+        minRunners: 0
+        # Single Docker host, no concurrency headroom to give away.
+        maxRunners: 1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-runners
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

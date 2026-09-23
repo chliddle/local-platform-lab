@@ -1,0 +1,25 @@
+# BuildKit executes arbitrary Dockerfile instructions with no auth of its
+# own -- restricting ingress to pods in the arc-runners namespace (the only
+# pods that should ever be building images) keeps a compromised pod
+# elsewhere in this cluster from reaching it. Matched via the namespace's
+# built-in kubernetes.io/metadata.name label (auto-set since Kubernetes
+# 1.21), not a hand-applied label that could drift.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: buildkitd-allow-runners-only
+  namespace: buildkit
+spec:
+  podSelector:
+    matchLabels:
+      app: buildkitd
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+      ports:
+        - port: 1234
+          protocol: TCP
+  policyTypes:
+    - Ingress
