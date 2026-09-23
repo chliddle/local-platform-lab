@@ -1,0 +1,83 @@
+name: integration
+
+# Real cross-repo integration test: does a platform change break an
+# already-onboarded app, and vice versa? Asserts every app declared under
+# gitops/{dev,prod}/apps/ is actually Synced+Healthy in the real,
+# already-warm dev/prod clusters. Supersedes an earlier ephemeral-Kind-
+# cluster version (see git history) that was abandoned after repeatedly
+# hitting Argo CD's reconciliation-timer lag on a cluster spun up fresh
+# every run -- a cost of that specific model, not a real bug. Only a
+# self-hosted runner has network access to dev/prod at all (see CLAUDE.md,
+# GitHub Actions Runners), which is why this can't run on a GitHub-hosted
+# runner the way the rest of this repo's CI does.
+#
+# No pull_request trigger, deliberately -- same reasoning as every other
+# workflow in this repo (see ci-manifests.yml): this repo's only
+# collaborator is its owner, so there's no path for anyone but the owner
+# to run anything here, structurally, rather than relying on GitHub's
+# fork-PR sandboxing to bound what a stranger's run could do. That matters
+# more here than anywhere else in this repo: this is the one workflow that
+# runs on the self-hosted runner with real network access to dev and prod.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "platform/**"
+      - "gitops/**"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: platform-runners
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install kubectl
+        run: |
+          arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.29.2/bin/linux/${arch}/kubectl"
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+      # dev-argocd-reader/prod-argocd-reader (scripts/sync-runner-creds.sh)
+      # live as Secrets in this runner pod's own namespace, not as GitHub
+      # secrets -- read via the pod's own in-cluster ServiceAccount token,
+      # scoped by Terraform to `get` only these two named Secrets (see
+      # terraform/environments/management/main.tf).
+      - name: Check Argo CD Application status in dev and prod
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        run: |
+          fail=0
+          for env in dev prod; do
+            secret_name="${env}-argocd-reader"
+            server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.server}' | base64 -d)
+            token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.token}' | base64 -d)
+            ca_file="$(mktemp)"
+            kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
+
+            for app_file in "gitops/${env}/apps/"*.yaml; do
+              app_name="$(basename "$app_file" .yaml)"
+              sync_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+                -n argocd get application "$app_name" -o jsonpath='{.status.sync.status}')
+              health_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+                -n argocd get application "$app_name" -o jsonpath='{.status.health.status}')
+              echo "${env}/${app_name}: sync=${sync_status} health=${health_status}"
+              if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
+                echo "::error::${env}/${app_name} is not Synced+Healthy (sync=${sync_status} health=${health_status})"
+                fail=1
+              fi
+            done
+
+            rm -f "$ca_file"
+          done
+          exit "$fail"

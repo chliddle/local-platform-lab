@@ -70,6 +70,47 @@ resource "helm_release" "platform_runners" {
   depends_on = [helm_release.arc_controller]
 }
 
+# Milestone 4, Phase D: lets runner pods read exactly the two credential
+# Secrets scripts/sync-runner-creds.sh writes here (dev-argocd-reader,
+# prod-argocd-reader) -- named by resource, not a blanket "secrets" grant,
+# so a compromised job still can't read anything else in this namespace
+# (e.g. the GitHub App/PAT credential itself). "platform-runners-gha-rs-
+# no-permission" is ARC's own default ServiceAccount for this scale set's
+# runner pods, confirmed via the EphemeralRunnerSet's pod spec -- its name
+# is accurate, it carries no RBAC until this binding.
+resource "kubernetes_role_v1" "runner_reads_argocd_creds" {
+  metadata {
+    name      = "runner-reads-argocd-creds"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  rule {
+    api_groups     = [""]
+    resources      = ["secrets"]
+    resource_names = ["dev-argocd-reader", "prod-argocd-reader"]
+    verbs          = ["get"]
+  }
+}
+
+resource "kubernetes_role_binding_v1" "runner_reads_argocd_creds" {
+  metadata {
+    name      = "runner-reads-argocd-creds"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role_v1.runner_reads_argocd_creds.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = "platform-runners-gha-rs-no-permission"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+}
+
 # Rootless, daemonless image builder. Mounting the host's Docker socket or
 # running a privileged Docker-in-Docker sidecar are both well-known
 # host-escape vectors and are ruled out for this project (CLAUDE.md,
