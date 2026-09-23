@@ -96,11 +96,47 @@ cluster_name="$(terraform -chdir="${env_dir}" output -raw cluster_name)"
 
 # Same wait for all three environments now -- everything past Argo CD
 # itself (ARC, BuildKit, onboarded apps) is GitOps-managed and becomes
-# ready asynchronously as Argo CD reconciles, not something this script
-# waits on directly.
+# ready asynchronously as Argo CD reconciles.
 argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
+
+# Waits for every Application (not just argocd-server) to be Synced+Healthy
+# before this script -- and scripts/up.sh, which bootstraps one environment
+# at a time -- moves on. Confirmed live (Milestone 5, Phase 4) this matters:
+# bootstrapping dev/prod/management concurrently let their reconcile storms
+# (first-time chart pulls, CRD registration, webhook cert generation)
+# overlap, which starved the shared Docker Desktop VM badly enough to make
+# even the real Kubernetes control plane (kube-controller-manager,
+# kube-scheduler) lose leader election. One environment fully settled
+# before the next one starts is slower end to end but doesn't compound.
+echo "==> Waiting for every Application to be Synced+Healthy (can take several minutes on a fresh bootstrap -- chart/image pulls)"
+deadline=$((SECONDS + 900))
+while true; do
+  app_names="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get applications -o jsonpath='{.items[*].metadata.name}')"
+  not_ready=""
+  if [ -z "$app_names" ]; then
+    not_ready="(no Applications registered yet)"
+  else
+    for name in $app_names; do
+      sync_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.sync.status}')"
+      health_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.health.status}')"
+      if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
+        not_ready="${not_ready}${name}: sync=${sync_status} health=${health_status}"$'\n'
+      fi
+    done
+  fi
+  if [ -z "$not_ready" ]; then
+    echo "    All Applications Synced+Healthy."
+    break
+  fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "error: timed out waiting for ${env_name}'s Applications to become healthy. Not Synced+Healthy:" >&2
+    echo "$not_ready" >&2
+    exit 1
+  fi
+  sleep 15
+done
 
 echo "==> Merging context into ~/.kube/config"
 mkdir -p "${HOME}/.kube"

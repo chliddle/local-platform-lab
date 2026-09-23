@@ -4,6 +4,16 @@
 # host-level setup Milestone 5's local HTTPS access needs. Idempotent --
 # safe to re-run (each step it calls is).
 #
+# Clusters bootstrap one at a time, and bootstrap.sh now blocks until every
+# Application in that cluster is Synced+Healthy before returning -- not
+# just until Argo CD itself is up. Confirmed live (Milestone 5, Phase 4)
+# this matters: bootstrapping all three concurrently let their reconcile
+# storms (first-time chart/image pulls, CRD registration, webhook cert
+# generation) overlap and starve the shared Docker Desktop VM badly enough
+# to make the real Kubernetes control plane lose leader election, not just
+# Argo CD. Slower end to end, but each cluster is genuinely settled before
+# the next one's storm begins, so they don't compound.
+#
 # The last three steps run real sudo commands interactively (docker-mac-
 # net-connect as a root service, binding dnsmasq to port 53, trusting a
 # CA in the System keychain) -- not scriptable non-interactively by
@@ -16,19 +26,19 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "==> [1/7] Bootstrapping management cluster"
+echo "==> [1/8] Bootstrapping management cluster (waits for full health)"
 "${repo_root}/scripts/bootstrap.sh" management
 
-echo "==> [2/7] Bootstrapping dev cluster"
+echo "==> [2/8] Bootstrapping dev cluster (waits for full health)"
 "${repo_root}/scripts/bootstrap.sh" dev
 
-echo "==> [3/7] Bootstrapping prod cluster"
+echo "==> [3/8] Bootstrapping prod cluster (waits for full health)"
 "${repo_root}/scripts/bootstrap.sh" prod
 
 echo "==> [4/8] Syncing dev/prod Argo CD read credentials into management"
 "${repo_root}/scripts/sync-runner-creds.sh"
 
-echo "==> [5/8] Syncing cross-cluster monitoring targets (scrape configs, CAs, endpoints)"
+echo "==> [5/8] Syncing cross-cluster monitoring targets (CAs, probe targets, OTLP endpoint)"
 "${repo_root}/scripts/sync-monitoring-targets.sh"
 
 echo "==> [6/8] Checking Mac -> cluster network routing"

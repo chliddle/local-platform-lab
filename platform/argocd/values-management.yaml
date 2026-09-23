@@ -21,6 +21,14 @@ controller:
     limits:
       cpu: 200m
       memory: 512Mi
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
 
 repoServer:
   resources:
@@ -39,6 +47,21 @@ repoServer:
     limits:
       cpu: 500m
       memory: 768Mi
+  # Loosened from the chart's defaults (1s timeout, 3-strike/30s failure
+  # window) -- confirmed live that's tight enough for a CPU-*limited*
+  # repo-server to trip it during a legitimate (not stuck) heavy render,
+  # causing a restart that throws away in-progress work and makes the
+  # underlying slowness worse, not better. 5s/6-strike/90s window tolerates
+  # real transient CPU-throttled slowness without masking an actually-dead
+  # process.
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
 
 server:
   resources:
@@ -48,6 +71,14 @@ server:
     limits:
       cpu: 100m
       memory: 256Mi
+  readinessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
+  livenessProbe:
+    timeoutSeconds: 5
+    failureThreshold: 6
+    periodSeconds: 15
 
 applicationSet:
   enabled: false
