@@ -101,6 +101,16 @@ argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
 
+# Management runs two charts (ARC, kube-prometheus-stack) with CRDs too
+# large for Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh
+# for the two distinct ways that fails live. Has to happen before the
+# health-wait below: those Applications can never reach Healthy without
+# their CRDs existing first.
+if [ "$env_name" = "management" ]; then
+  echo "==> Pre-applying large CRDs Argo CD can't sync safely (ARC, kube-prometheus-stack)"
+  "${repo_root}/scripts/pre-apply-large-crds.sh"
+fi
+
 # Waits for every Application (not just argocd-server) to be Synced+Healthy
 # before this script -- and scripts/up.sh, which bootstraps one environment
 # at a time -- moves on. Confirmed live (Milestone 5, Phase 4) this matters:

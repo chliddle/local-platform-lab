@@ -47,5 +47,13 @@ spec:
       # replace` never touches that annotation at all. Safe for CRDs
       # specifically -- they're schema definitions with no stateful data a
       # replace could lose.
+      #
+      # This chart has no crds.enabled-style toggle to opt out of Argo CD
+      # managing them the way kube-prometheus-stack.yaml does, so
+      # scripts/pre-apply-large-crds.sh pre-applies these CRDs directly
+      # before Argo CD ever syncs this Application -- once they already
+      # match, Argo CD's own sync sees no real diff to push through the
+      # size-limited codepath (see kube-prometheus-stack.yaml's comment
+      # for the etcd request-size failure this sidesteps).
       - ServerSideApply=true
       - Replace=true

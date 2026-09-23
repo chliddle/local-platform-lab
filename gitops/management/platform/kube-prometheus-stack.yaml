@@ -106,6 +106,16 @@ spec:
           enabled: false
         nodeExporter:
           enabled: false
+        # CRDs are NOT managed by this Application -- confirmed live these
+        # CRDs (prometheuses.monitoring.coreos.com alone is ~850KB) are too
+        # large for Argo CD to safely track: applying them here made the
+        # application-controller's own status write exceed etcd's request
+        # size limit ("etcdserver: request is too large"), which left the
+        # sync operation permanently stuck rather than just slow. Applied
+        # out-of-band instead, via scripts/pre-apply-large-crds.sh (same
+        # reasoning, same fix, as ARC's CRDs -- see arc-controller.yaml).
+        crds:
+          enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
