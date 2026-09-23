@@ -988,6 +988,13 @@ not assumed from the Terraform reading as intended.
 * cert-manager
 * HTTPS application access
 
+In progress. `make up`/`make down` bring the whole platform (all three
+clusters plus the host-level setup local HTTPS access needs) up and down
+in one command each -- see [docs/local-https-access.md](docs/local-https-access.md)
+for what that host-level setup actually does and why (Mac-to-cluster
+network routing, local DNS, CA trust all need real one-time,
+interactive-sudo setup that can't be silently scripted, by design).
+
 ## Milestone 6
 
 * Argo Rollouts

@@ -12,7 +12,9 @@
 # only needs read access to kubeconfigs the host already has.
 #
 # Container IPs are NOT stable across `kind delete`/`create` -- re-run this
-# after recreating dev, prod, or management.
+# after recreating dev, prod, or management. Called automatically by
+# scripts/up.sh; run it directly if you've only recreated one cluster and
+# don't want to re-run the whole platform bootstrap.
 #
 # Usage: scripts/sync-runner-creds.sh
 set -euo pipefail
