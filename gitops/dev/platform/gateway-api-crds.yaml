@@ -15,13 +15,23 @@ spec:
     targetRevision: v1.6.2
     path: config/crd/standard
     directory:
-      # Verified live: this ValidatingAdmissionPolicy/-Binding pair (an
-      # optional guard against installing experimental-channel CRDs on top
-      # of standard-channel ones -- not needed for GatewayClass/Gateway/
-      # HTTPRoute itself) hits an Argo CD sync bug against this version
-      # ("ValidatingAdmissionPolicy... \"\" not found", despite both
-      # resources having real names) -- excluded rather than fought.
-      exclude: "gateway.networking.k8s.io_vap_safeupgrades.yaml"
+      # Two exclusions, both verified live against this cluster's pinned
+      # Kubernetes version (kindest/node:v1.29.2, see
+      # terraform/modules/kind-cluster/variables.tf):
+      #  - vap_safeupgrades: an optional guard against installing
+      #    experimental-channel CRDs on top of standard-channel ones (not
+      #    needed for GatewayClass/Gateway/HTTPRoute itself). Hits an Argo
+      #    CD sync bug against this Argo CD version ("ValidatingAdmission
+      #    Policy... \"\" not found", despite both resources having real
+      #    names) -- excluded rather than fought.
+      #  - tlsroutes: not used by anything in this plan (only Gateway/
+      #    GatewayClass/HTTPRoute/ReferenceGrant are). Its CRD schema uses
+      #    the `isIP`/`isCIDR` CEL library functions, only available on
+      #    Kubernetes >= 1.31 -- rejected outright by this cluster's 1.29
+      #    API server ("undeclared reference to 'isIP'"). Upgrading the
+      #    pinned node image for one unused CRD isn't worth the blast
+      #    radius across all three clusters.
+      exclude: "{gateway.networking.k8s.io_vap_safeupgrades.yaml,gateway.networking.k8s.io_tlsroutes.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: gateway-api-system
