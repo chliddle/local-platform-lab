@@ -69,3 +69,143 @@ resource "helm_release" "platform_runners" {
 
   depends_on = [helm_release.arc_controller]
 }
+
+# Rootless, daemonless image builder. Mounting the host's Docker socket or
+# running a privileged Docker-in-Docker sidecar are both well-known
+# host-escape vectors and are ruled out for this project (CLAUDE.md,
+# Milestone 4) -- runner pods build images by talking to this Service over
+# the network instead (buildx's `remote` driver, wired up in the workflow
+# itself). Manifest follows moby/buildkit's own reference Kubernetes
+# example (examples/kubernetes/deployment+service.rootless.yaml), pinned to
+# a digest rather than a floating tag.
+resource "kubernetes_namespace_v1" "buildkit" {
+  metadata {
+    name = "buildkit"
+  }
+}
+
+resource "kubernetes_deployment_v1" "buildkitd" {
+  metadata {
+    name      = "buildkitd"
+    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
+  }
+
+  spec {
+    replicas = 1
+
+    selector {
+      match_labels = {
+        app = "buildkitd"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "buildkitd"
+        }
+        annotations = {
+          "container.apparmor.security.beta.kubernetes.io/buildkitd" = "unconfined"
+        }
+      }
+
+      spec {
+        container {
+          name  = "buildkitd"
+          image = "moby/buildkit:v0.33.0-rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef"
+
+          args = [
+            "--addr", "unix:///run/user/1000/buildkit/buildkitd.sock",
+            "--addr", "tcp://0.0.0.0:1234",
+            "--oci-worker-no-process-sandbox",
+          ]
+
+          port {
+            container_port = 1234
+          }
+
+          security_context {
+            run_as_user  = 1000
+            run_as_group = 1000
+            seccomp_profile {
+              type = "Unconfined"
+            }
+          }
+
+          readiness_probe {
+            exec {
+              command = ["buildctl", "debug", "workers"]
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 30
+          }
+
+          liveness_probe {
+            exec {
+              command = ["buildctl", "debug", "workers"]
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 30
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "buildkitd" {
+  metadata {
+    name      = "buildkitd"
+    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
+  }
+
+  spec {
+    type = "ClusterIP"
+
+    selector = {
+      app = "buildkitd"
+    }
+
+    port {
+      port        = 1234
+      target_port = 1234
+    }
+  }
+}
+
+# BuildKit executes arbitrary Dockerfile instructions with no auth of its
+# own -- restricting ingress to pods in the arc-runners namespace (the only
+# pods that should ever be building images) keeps a compromised pod
+# elsewhere in this cluster from reaching it. Matched via the namespace's
+# built-in kubernetes.io/metadata.name label (auto-set since Kubernetes
+# 1.21), not a hand-applied label that could drift.
+resource "kubernetes_network_policy_v1" "buildkitd" {
+  metadata {
+    name      = "buildkitd-allow-runners-only"
+    namespace = kubernetes_namespace_v1.buildkit.metadata[0].name
+  }
+
+  spec {
+    pod_selector {
+      match_labels = {
+        app = "buildkitd"
+      }
+    }
+
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = kubernetes_namespace_v1.arc_runners.metadata[0].name
+          }
+        }
+      }
+      ports {
+        port     = 1234
+        protocol = "TCP"
+      }
+    }
+
+    policy_types = ["Ingress"]
+  }
+}
