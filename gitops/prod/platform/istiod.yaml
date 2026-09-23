@@ -5,6 +5,12 @@
 # sized for real clusters) to fit three Kind clusters running on one
 # laptop -- same reasoning as platform/argocd/values-dev.yaml.
 #
+# autoscaleEnabled: false -- no metrics-server anywhere in this project, so
+# the chart's default HPA can never read CPU metrics; verified live it
+# reports FailedGetResourceMetric and drags istiod's health to Degraded
+# even though the pod itself is Running/Ready. Autoscaling a single-node
+# Kind control plane has no value here anyway.
+#
 # Istio's Gateway API auto-provisioning (a `Gateway` resource with
 # gatewayClassName: istio triggers istiod to deploy a proxy automatically)
 # is used instead of a separate istio-ingressgateway Helm release -- see
@@ -24,6 +30,7 @@ spec:
     targetRevision: "1.30.5"
     helm:
       valuesObject:
+        autoscaleEnabled: false
         pilot:
           resources:
             requests:

@@ -14,6 +14,14 @@ spec:
     repoURL: https://github.com/kubernetes-sigs/gateway-api.git
     targetRevision: v1.6.2
     path: config/crd/standard
+    directory:
+      # Verified live: this ValidatingAdmissionPolicy/-Binding pair (an
+      # optional guard against installing experimental-channel CRDs on top
+      # of standard-channel ones -- not needed for GatewayClass/Gateway/
+      # HTTPRoute itself) hits an Argo CD sync bug against this version
+      # ("ValidatingAdmissionPolicy... \"\" not found", despite both
+      # resources having real names) -- excluded rather than fought.
+      exclude: "gateway.networking.k8s.io_vap_safeupgrades.yaml"
   destination:
     server: https://kubernetes.default.svc
     namespace: gateway-api-system
