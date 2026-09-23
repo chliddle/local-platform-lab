@@ -42,3 +42,15 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+  # Verified live: the CRDs (certificaterequests/certificates/challenges/
+  # orders) perpetually show OutOfSync on metadata.annotations -- kubectl's
+  # own client-side-apply bookkeeping annotation
+  # (kubectl.kubernetes.io/last-applied-configuration) ends up on the live
+  # object but isn't part of the Helm-rendered desired state. Health stays
+  # Healthy throughout; this is cosmetic annotation churn, not a functional
+  # drift, same class of issue as istiod's webhook caBundle.
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - '.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]'
