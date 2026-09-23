@@ -40,7 +40,12 @@ spec:
       # last-applied-configuration annotation exceeds Kubernetes'
       # 262144-byte annotation limit -- confirmed live on a from-scratch
       # bootstrap (never hit before because management had never actually
-      # been torn down and recreated until this session). Server-side
-      # apply doesn't compute that annotation at all, so it doesn't hit
-      # the limit -- the fix the error message itself points at.
+      # been torn down and recreated until this session).
+      # ServerSideApply=true alone did NOT fix this (confirmed live --
+      # Argo CD's diffing still hit the same annotation limit even with it
+      # set); Replace=true is what actually sidesteps it, since a `kubectl
+      # replace` never touches that annotation at all. Safe for CRDs
+      # specifically -- they're schema definitions with no stateful data a
+      # replace could lose.
       - ServerSideApply=true
+      - Replace=true
