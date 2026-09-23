@@ -42,15 +42,24 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-  # Verified live: the CRDs (certificaterequests/certificates/challenges/
-  # orders) perpetually show OutOfSync on metadata.annotations -- kubectl's
-  # own client-side-apply bookkeeping annotation
-  # (kubectl.kubernetes.io/last-applied-configuration) ends up on the live
-  # object but isn't part of the Helm-rendered desired state. Health stays
-  # Healthy throughout; this is cosmetic annotation churn, not a functional
-  # drift, same class of issue as istiod's webhook caBundle.
+  # Verified live via a direct diff (live CRD vs a fresh `helm template`
+  # render) -- two real causes, both benign:
+  #  - metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]:
+  #    kubectl's own client-side-apply bookkeeping, never part of the
+  #    Helm-rendered desired state.
+  #  - spec.conversion / spec.versions[].selectableFields: this cluster's
+  #    pinned Kubernetes v1.29.2 (see terraform/modules/kind-cluster/
+  #    variables.tf) doesn't support `selectableFields` (a CRD feature
+  #    added in Kubernetes 1.31+) -- the API server silently drops it on
+  #    creation, and defaults spec.conversion.strategy to "None" when
+  #    omitted, both against Kubernetes' 1.29 CRD API only. Same class of
+  #    version gap as Gateway API's tlsroutes CRD in Phase 2, here handled
+  #    by ignoring rather than excluding since the rest of these CRDs are
+  #    load-bearing (unlike tlsroutes).
   ignoreDifferences:
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
       jqPathExpressions:
         - '.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]'
+        - '.spec.conversion'
+        - '.spec.versions[]?.selectableFields'
