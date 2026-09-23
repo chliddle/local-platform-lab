@@ -35,6 +35,17 @@ spec:
         minRunners: 0
         # Single Docker host, no concurrency headroom to give away.
         maxRunners: 1
+        # This chart's manager_role_binding template discovers the
+        # controller's ServiceAccount via a live cluster label lookup by
+        # default -- Argo CD's repo-server renders `helm template` without
+        # cluster access (unlike Terraform's helm provider, which has real
+        # API access during `helm upgrade --install`), so that lookup fails
+        # here. Set explicitly instead, per the chart's own error guidance.
+        # Confirmed live: arc-controller's release name "arc" produces
+        # ServiceAccount arc-gha-rs-controller in arc-systems.
+        controllerServiceAccount:
+          name: arc-gha-rs-controller
+          namespace: arc-systems
   destination:
     server: https://kubernetes.default.svc
     namespace: arc-runners
