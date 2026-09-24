@@ -149,12 +149,48 @@ while true; do
 done
 
 echo "==> Merging context into ~/.kube/config"
-mkdir -p "${HOME}/.kube"
-[ -f "${HOME}/.kube/config" ] && cp "${HOME}/.kube/config" "${HOME}/.kube/config.bak"
-KUBECONFIG="${HOME}/.kube/config:${kubeconfig_path}" kubectl config view --flatten >"${HOME}/.kube/config.new"
-mv "${HOME}/.kube/config.new" "${HOME}/.kube/config"
-chmod 600 "${HOME}/.kube/config"
 context_name="kind-${cluster_name}"
+mkdir -p "${HOME}/.kube"
+
+# Serialize this against any other bootstrap.sh run merging into the same
+# ~/.kube/config at the same time (e.g. `make up` bootstrapping one
+# environment while a manual `make bootstrap-prod` runs in another
+# terminal). `kubectl config view --flatten` reads then rewrites the whole
+# file non-atomically -- confirmed live this session that two overlapping
+# runs can race and one write's result silently clobbers the other's,
+# up to and including reducing ~/.kube/config to empty. mkdir is an atomic,
+# dependency-free lock primitive (flock isn't installed on macOS by
+# default, confirmed on this machine).
+lock_dir="${HOME}/.kube/.local-platform-lab.lock"
+lock_attempts=0
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  lock_attempts=$((lock_attempts + 1))
+  if [ "$lock_attempts" -ge 60 ]; then
+    echo "error: timed out waiting for the ~/.kube/config lock (${lock_dir}) -- held by another bootstrap.sh run? remove it manually if that run crashed." >&2
+    exit 1
+  fi
+  sleep 1
+done
+trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+
+[ -f "${HOME}/.kube/config" ] && cp "${HOME}/.kube/config" "${HOME}/.kube/config.bak"
+merged="$(KUBECONFIG="${HOME}/.kube/config:${kubeconfig_path}" kubectl config view --flatten)"
+# Sanity check before overwriting: the merge result must actually contain
+# the context this run just bootstrapped. A merge that's missing it (or
+# came back empty) means something upstream went wrong -- e.g. a stale/
+# empty KUBECONFIG mid-race -- and writing it would silently wipe every
+# other context already in this file, contexts for other clusters/
+# projects included.
+if ! grep -q "name: ${context_name}$" <<<"$merged"; then
+  echo "warning: merged kubeconfig doesn't contain ${context_name} -- not touching ~/.kube/config to avoid wiping it. ${kubeconfig_path} still works standalone; re-run this script if the merge should have worked." >&2
+else
+  printf '%s\n' "$merged" >"${HOME}/.kube/config.new"
+  mv "${HOME}/.kube/config.new" "${HOME}/.kube/config"
+  chmod 600 "${HOME}/.kube/config"
+fi
+
+rmdir "$lock_dir" 2>/dev/null || true
+trap - EXIT
 
 cat <<EOF
 
