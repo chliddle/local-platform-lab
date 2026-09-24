@@ -67,20 +67,37 @@ resource "kubernetes_secret_v1" "argocd_repo_creds" {
   depends_on = [helm_release.argocd]
 }
 
-resource "kubernetes_namespace_v1" "hello_world" {
+# Milestone 6: dev runs template-test-1 three ways in parallel (rolling/
+# blue-green/canary deployment-strategy comparison, see gitops/dev/apps/
+# template-test-1-{rolling,bluegreen,canary}.yaml), each its own
+# namespace -- the single "template-test-1" namespace dev used to use is
+# gone (confirmed live it's empty -- nothing deploys there any more) in
+# favor of a for_each over the three variant names. prod is unaffected
+# (terraform/environments/prod/main.tf): it still runs a single
+# unconverted template-test-1 namespace, unchanged.
+locals {
+  template_test_1_variants = ["rolling", "bluegreen", "canary"]
+}
+
+resource "kubernetes_namespace_v1" "template_test_1" {
+  for_each = toset(local.template_test_1_variants)
+
   metadata {
-    name = "template-test-1"
+    name = "template-test-1-${each.value}"
   }
 }
 
 # Lets the Kind node pull the private ghcr.io/chliddle/template-test-1
-# image. Referenced by name from deploy/base/deployment.yaml in that app's
-# own repo (chliddle/template-test-1) -- our example/test app generated
-# from the local-platform-lab-app-template template repo.
+# image, one copy per variant namespace. Referenced by name from each
+# deploy/overlays/dev-*/ manifest in that app's own repo
+# (chliddle/template-test-1) -- our example/test app generated from the
+# local-platform-lab-app-template template repo.
 resource "kubernetes_secret_v1" "ghcr_pull" {
+  for_each = toset(local.template_test_1_variants)
+
   metadata {
     name      = "ghcr-pull-secret"
-    namespace = kubernetes_namespace_v1.hello_world.metadata[0].name
+    namespace = kubernetes_namespace_v1.template_test_1[each.value].metadata[0].name
   }
 
   type = "kubernetes.io/dockerconfigjson"

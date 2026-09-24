@@ -53,6 +53,15 @@ spec:
       valuesObject:
         service:
           type: NodePort
+        # This chart's autoscaling.enabled defaults to true, creating an
+        # HPA -- confirmed live it leaves the Application permanently
+        # Degraded in Argo CD's eyes (HPA status.conditions:
+        # ScalingActive=False, "unable to fetch metrics... could not find
+        # pods.metrics.k8s.io") since no metrics-server runs anywhere in
+        # this project. One replica is plenty for a lab-scale comparison
+        # gateway anyway.
+        autoscaling:
+          enabled: false
         resources:
           requests:
             cpu: 25m

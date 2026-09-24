@@ -2,8 +2,11 @@
 # live during a canary rollout (see deploy/overlays/dev-canary/
 # rollout.yaml in template-test-1: trafficRouting.istio.virtualService,
 # name/route name must match exactly). The route named "primary" below is
-# the one Rollouts recognizes and rewrites; its initial state (100% to
-# the stable subset) is just steady-state before any rollout is active.
+# the one Rollouts recognizes and rewrites. Both destinations must be
+# present from the start (canary at weight 0) -- confirmed live: with
+# only the stable destination listed, the Rollout itself is rejected
+# ("Canary DestinationRule subset 'canary' not found in route"),
+# matching Argo Rollouts' own documented example.
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -23,3 +26,9 @@ spec:
             port:
               number: 8080
           weight: 100
+        - destination:
+            host: template-test-1.template-test-1-canary.svc.cluster.local
+            subset: canary
+            port:
+              number: 8080
+          weight: 0
