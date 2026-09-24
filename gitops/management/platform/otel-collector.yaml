@@ -60,6 +60,21 @@ spec:
           limits:
             cpu: 200m
             memory: 320Mi
+        # Loosened from the chart's defaults (no initial delay, 3-strike/
+        # 30s failure window) -- confirmed live on dev this is too tight
+        # for this exact preset combination's real startup work (leader
+        # election Lease, k8s_attributes informer sync, logsCollection's
+        # initial /var/log/pods scan) -- see
+        # platform/gitops-platform-apps/otel-collector-agent.yaml's
+        # comment for the full explanation.
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 6
+        readinessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 6
         presets:
           logsCollection:
             enabled: true
