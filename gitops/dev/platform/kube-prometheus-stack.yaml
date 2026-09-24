@@ -65,9 +65,18 @@ spec:
                 memory: 512Mi
             # Prometheus 3.x's native OTLP metrics receiver -- this
             # cluster's OTel Collector (otel-collector.yaml) pushes here
-            # instead of being pull-scraped.
-            enableFeatures:
-              - otlp-write-receiver
+            # instead of being pull-scraped. NOT an enableFeatures entry:
+            # confirmed live (`prometheus --help` inside the running pod)
+            # that `--enable-feature=otlp-write-receiver` is stale syntax
+            # from an older Prometheus version -- this build just logs
+            # "Unknown option for --enable-feature" and silently ignores
+            # it, which meant the OTLP endpoint 404'd the whole time and
+            # every metric the collector tried to push was silently
+            # dropped. The actual flag is the dedicated
+            # --web.enable-otlp-receiver, which the Prometheus Operator
+            # CRD exposes as this top-level field, confirmed via the
+            # installed CRD's schema.
+            enableOTLPReceiver: true
         alertmanager:
           alertmanagerSpec:
             resources:
