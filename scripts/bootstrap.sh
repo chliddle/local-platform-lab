@@ -120,6 +120,20 @@ fi
 # even the real Kubernetes control plane (kube-controller-manager,
 # kube-scheduler) lose leader election. One environment fully settled
 # before the next one starts is slower end to end but doesn't compound.
+# blackbox-exporter on management can never reach Healthy at this point in
+# scripts/up.sh's sequence: it needs the blackbox-target-cas Secret, which
+# only scripts/sync-monitoring-targets.sh can create (it reads dev/prod's
+# live root CA certs) -- and that script runs *after* all three clusters
+# are bootstrapped, since it needs dev/prod to already exist. A genuine
+# circular dependency for a fresh bootstrap specifically, not a bug in
+# blackbox-exporter itself -- skip it here rather than hang until the 30
+# minute deadline. `make up` calls sync-monitoring-targets.sh right after
+# all three bootstraps finish, which unblocks it for real.
+skip_apps=""
+if [ "$env_name" = "management" ]; then
+  skip_apps="blackbox-exporter"
+fi
+
 echo "==> Waiting for every Application to be Synced+Healthy (can take a while on a fresh bootstrap -- chart/image pulls for everything at once)"
 deadline=$((SECONDS + 1800))
 while true; do
@@ -129,6 +143,9 @@ while true; do
     not_ready="(no Applications registered yet)"
   else
     for name in $app_names; do
+      case " $skip_apps " in
+        *" $name "*) continue ;;
+      esac
       sync_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.sync.status}')"
       health_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.health.status}')"
       if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
@@ -159,8 +176,17 @@ echo "==> Waiting for every pod cluster-wide to be Ready"
 # kube-prometheus-stack's admission-webhook cert generator) leave a pod
 # behind in Succeeded phase that will never satisfy condition=Ready;
 # without this filter the wait just burns its full timeout on those.
+# Also excludes blackbox-exporter's pod on management, same circular
+# dependency as the Application-level skip above -- it's stuck
+# ContainerCreating (missing Secret) until sync-monitoring-targets.sh runs
+# later in scripts/up.sh's sequence, not actually broken.
+pod_selector="app.kubernetes.io/instance!=blackbox-exporter"
+if [ "$env_name" != "management" ]; then
+  pod_selector=""
+fi
 KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
-  --field-selector=status.phase!=Succeeded,status.phase!=Failed --timeout=300s
+  --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+  ${pod_selector:+-l "$pod_selector"} --timeout=300s
 
 # Real settle time before this script returns -- and before scripts/up.sh
 # starts the next environment's bootstrap. Confirmed live (this session)
