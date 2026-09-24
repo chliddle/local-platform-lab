@@ -159,9 +159,24 @@ echo "==> Waiting for every pod cluster-wide to be Ready"
 # kube-prometheus-stack's admission-webhook cert generator) leave a pod
 # behind in Succeeded phase that will never satisfy condition=Ready;
 # without this filter the wait just burns its full timeout on those.
-KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
+#
+# Retried up to 3 times, not a single call -- confirmed live this session
+# (twice) that `kubectl wait`'s watch can get stuck indefinitely past its
+# own --timeout if a pod it's tracking is deleted out from under it
+# mid-wait (e.g. a namespace deleted concurrently) -- a client-side watch
+# bug, not a real cluster problem: a brand new invocation of the identical
+# command against the same, already-healthy cluster succeeds immediately.
+pod_wait_attempt=1
+until KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
   --field-selector=status.phase!=Succeeded,status.phase!=Failed \
-  --timeout=300s
+  --timeout=300s; do
+  if [ "$pod_wait_attempt" -ge 3 ]; then
+    echo "error: pod-readiness wait failed after ${pod_wait_attempt} attempts." >&2
+    exit 1
+  fi
+  echo "==> Pod-readiness wait didn't converge (attempt ${pod_wait_attempt}) -- retrying with a fresh invocation"
+  pod_wait_attempt=$((pod_wait_attempt + 1))
+done
 
 # Real settle time before this script returns -- and before scripts/up.sh
 # starts the next environment's bootstrap. Confirmed live (this session)

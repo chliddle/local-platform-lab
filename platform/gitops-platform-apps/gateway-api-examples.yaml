@@ -6,6 +6,8 @@ kind: Application
 metadata:
   name: gateway-api-examples
   namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:

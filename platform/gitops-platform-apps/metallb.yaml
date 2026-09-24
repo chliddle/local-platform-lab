@@ -8,6 +8,8 @@ kind: Application
 metadata:
   name: metallb
   namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:

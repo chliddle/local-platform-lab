@@ -8,6 +8,8 @@ kind: Application
 metadata:
   name: gateway-api-crds
   namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
