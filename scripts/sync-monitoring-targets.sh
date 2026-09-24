@@ -74,6 +74,14 @@ ca_file="$(mktemp)"
 trap 'rm -f "$ca_file"' EXIT
 KUBECONFIG="$kubeconfig" kubectl -n cert-manager get secret "${env_name}-root-ca-secret" -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
 
+# The monitoring namespace is normally created by Argo CD (CreateNamespace=true
+# on whichever observability Application syncs first), but that's a race this
+# script can't depend on winning -- confirmed live it loses often enough to
+# matter (this Secret write 404ing with "namespaces monitoring not found" on
+# a truly fresh cluster). Idempotent and harmless if Argo CD gets there first.
+KUBECONFIG="$kubeconfig" kubectl create namespace monitoring --dry-run=client -o yaml \
+  | KUBECONFIG="$kubeconfig" kubectl apply -f -
+
 echo "==> [${env_name}] Copying the root CA into monitoring for blackbox-exporter"
 KUBECONFIG="$kubeconfig" kubectl -n monitoring create secret generic blackbox-target-ca \
   --from-file="ca.crt=${ca_file}" \
