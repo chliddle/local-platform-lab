@@ -1,7 +1,11 @@
+# Milestone 6: one of three parallel deployment-strategy comparison
+# variants -- see gitops/dev/apps/template-test-1-{rolling,canary}.yaml
+# and platform/rollouts/. Argo Rollouts blue-green: manual promotion gate
+# (activeService/previewService), no Istio wiring needed.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: template-test-1
+  name: template-test-1-bluegreen
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -10,10 +14,10 @@ spec:
   source:
     repoURL: https://github.com/chliddle/template-test-1.git
     targetRevision: main
-    path: deploy/overlays/dev
+    path: deploy/overlays/dev-bluegreen
   destination:
     server: https://kubernetes.default.svc
-    namespace: template-test-1
+    namespace: template-test-1-bluegreen
   syncPolicy:
     automated:
       prune: true

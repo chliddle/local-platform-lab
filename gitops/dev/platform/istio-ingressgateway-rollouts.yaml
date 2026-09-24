@@ -1,0 +1,71 @@
+# Milestone 6, dev only: a SECOND, dedicated Istio ingress proxy, only for
+# template-test-1-canary's traffic -- deliberately separate from the
+# shared demo-gateway (platform/gateway-api/examples/gateway.yaml).
+#
+# Confirmed live this is genuinely necessary, not just a stylistic split:
+# Argo Rollouts' native Istio integration needs a VirtualService+
+# DestinationRule (classic networking.istio.io APIs) to control canary
+# weights, and a classic VirtualService's `gateways` field CANNOT attach
+# to a Gateway API `Gateway` resource's auto-provisioned proxy -- tested
+# live (a VirtualService referencing "gateway-api-examples/demo-gateway"
+# was accepted by the API and pushed by istiod with no error, but never
+# actually appeared in that proxy's route config; Istio's own direction is
+# Gateway API + HTTPRoute as the primary/recommended model going forward,
+# and VirtualService's `gateways` field is a legacy mechanism that was
+# never wired up to attach to Gateway API Gateways). A classic
+# `networking.istio.io/v1 Gateway` (platform/rollouts/dev/gateway.yaml)
+# also doesn't auto-provision a proxy the way a Gateway API Gateway does
+# -- confirmed live -- so this Application deploys one explicitly via
+# Istio's own `gateway` Helm chart (the same chart istiod uses internally
+# for Gateway API auto-provisioning, just installed directly this time).
+#
+# This split also strengthens CLAUDE.md's "comparison between Gateway API
+# and Istio-native routing" goal: dev-rolling/dev-bluegreen route through
+# demo-gateway (Gateway API + HTTPRoute), dev-canary routes through this
+# proxy (classic Istio Gateway + VirtualService) -- two real, physically
+# separate ingress paths demonstrating each model for what it's actually
+# good at, not just two YAML shapes describing the same underlying proxy.
+#
+# HTTP only, no TLS -- a deliberate scope cut, not an oversight: wiring
+# TLS here means Istio's `credentialName`-based cross-namespace Secret
+# access (classic Gateway's TLS model, different from Gateway API's
+# same-namespace certificateRefs already used by demo-gateway), which
+# isn't needed to prove the actual point of this milestone (canary/blue-
+# green/rollback mechanics). Revisit if/when prod adopts this pattern.
+#
+# NodePort, not LoadBalancer -- same reasoning as demo-gateway's own
+# MetalLB-removal comment: no MetalLB in this cluster any more.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-ingressgateway-rollouts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: gateway
+    targetRevision: "1.30.5"
+    helm:
+      releaseName: istio-ingressgateway-rollouts
+      valuesObject:
+        service:
+          type: NodePort
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-ingress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

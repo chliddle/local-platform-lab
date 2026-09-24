@@ -1,0 +1,26 @@
+# Milestone 6: one of three parallel deployment-strategy comparison
+# variants -- see gitops/dev/apps/template-test-1-{bluegreen,canary}.yaml
+# and platform/rollouts/. This one is the control group: a plain
+# apps/v1 Deployment, today's exact pre-Milestone-6 behavior.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: template-test-1-rolling
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/template-test-1.git
+    targetRevision: main
+    path: deploy/overlays/dev-rolling
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: template-test-1-rolling
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

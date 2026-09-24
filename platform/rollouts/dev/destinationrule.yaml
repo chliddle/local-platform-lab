@@ -1,0 +1,19 @@
+# Empty subset label selectors -- Argo Rollouts' controller patches
+# rollouts-pod-template-hash into spec.subsets[].labels automatically as
+# it manages the canary (confirmed via the Argo Rollouts Istio docs: "the
+# controller will modify the DestinationRule spec.subsets[].labels to
+# contain the rollouts-pod-template-hash"). Name/canarySubsetName/
+# stableSubsetName must match deploy/overlays/dev-canary/rollout.yaml in
+# template-test-1 exactly.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: template-test-1
+  namespace: template-test-1-canary
+spec:
+  host: template-test-1.template-test-1-canary.svc.cluster.local
+  subsets:
+    - name: stable
+      labels: {}
+    - name: canary
+      labels: {}

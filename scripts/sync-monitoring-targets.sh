@@ -28,8 +28,13 @@
 # Writes, in dev, namespace monitoring:
 #   - Secret blackbox-target-ca: dev's own root CA cert, mounted into
 #     blackbox-exporter (gitops/dev/platform/blackbox-exporter.yaml).
-#   - Probe template-test-1: dev's own Gateway node-IP:nodePort as the
-#     static blackbox probe target.
+#   - Probe template-test-1-{rolling,bluegreen,canary}: dev's own Gateway
+#     node-IP:nodePort as the static blackbox probe target for each of
+#     the three Milestone 6 deployment-strategy variants -- rolling/
+#     bluegreen share demo-gateway's node-IP:nodePort (different paths,
+#     same HTTPS module); canary uses the separate dedicated
+#     istio-ingressgateway-rollouts Service's own node-IP:nodePort
+#     (HTTP-only, see that Application's comment).
 #
 # Neither the node IP nor the nodePort is stable across `kind delete`/
 # `create` -- re-run this after recreating dev. Called automatically by
@@ -86,6 +91,21 @@ while [ -z "$gw_ip" ] || [ -z "$gw_port" ]; do
 done
 echo "    ${env_name} gateway=${gw_ip}:${gw_port}"
 
+echo "==> [${env_name}] Waiting for the canary variant's ingress gateway NodePort"
+canary_port="" deadline=$((SECONDS + 180))
+while [ -z "$canary_port" ]; do
+  canary_port="$(KUBECONFIG="$kubeconfig" kubectl -n istio-ingress get svc istio-ingressgateway-rollouts -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}' 2>/dev/null || true)"
+  if [ -n "$canary_port" ]; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "error: timed out waiting for ${env_name}'s istio-ingressgateway-rollouts Service to be provisioned." >&2
+    exit 1
+  fi
+  sleep 10
+done
+echo "    ${env_name} canary gateway=${gw_ip}:${canary_port}"
+
 ca_file="$(mktemp)"
 trap 'rm -f "$ca_file"' EXIT
 KUBECONFIG="$kubeconfig" kubectl -n cert-manager get secret "${env_name}-root-ca-secret" -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
@@ -104,17 +124,24 @@ KUBECONFIG="$kubeconfig" kubectl -n monitoring create secret generic blackbox-ta
   --dry-run=client -o yaml \
   | KUBECONFIG="$kubeconfig" kubectl apply -f -
 
-echo "==> [${env_name}] Writing the blackbox Probe for this cluster's Gateway"
+# Cleans up the single pre-Milestone-6 Probe this script used to write
+# (named "template-test-1", now replaced by the three variant-specific
+# ones below) -- this script's kubectl apply isn't Argo CD-tracked, so a
+# renamed/removed resource here would otherwise orphan silently instead
+# of pruning itself the way a real GitOps resource would.
+KUBECONFIG="$kubeconfig" kubectl -n monitoring delete probe template-test-1 --ignore-not-found
+
+echo "==> [${env_name}] Writing the blackbox Probes for the three deployment-strategy variants"
 KUBECONFIG="$kubeconfig" kubectl apply -f - <<EOF
 apiVersion: monitoring.coreos.com/v1
 kind: Probe
 metadata:
-  name: template-test-1
+  name: template-test-1-rolling
   namespace: monitoring
   labels:
     release: kube-prometheus-stack
 spec:
-  jobName: blackbox-template-test-1
+  jobName: blackbox-template-test-1-rolling
   interval: 120s
   module: https
   prober:
@@ -122,9 +149,52 @@ spec:
   targets:
     staticConfig:
       static:
-        - "https://${gw_ip}:${gw_port}/"
+        - "https://${gw_ip}:${gw_port}/rolling"
       labels:
         cluster: ${env_name}
+        variant: rolling
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: template-test-1-bluegreen
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  jobName: blackbox-template-test-1-bluegreen
+  interval: 120s
+  module: https
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - "https://${gw_ip}:${gw_port}/bluegreen"
+      labels:
+        cluster: ${env_name}
+        variant: bluegreen
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: template-test-1-canary
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  jobName: blackbox-template-test-1-canary
+  interval: 120s
+  module: http
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - "http://${gw_ip}:${canary_port}/"
+      labels:
+        cluster: ${env_name}
+        variant: canary
 EOF
 
 echo ""

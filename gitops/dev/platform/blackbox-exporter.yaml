@@ -59,6 +59,18 @@ spec:
                 tls_config:
                   server_name: template-test-1.dev.platform.local
                   ca_file: /etc/blackbox/certs/ca.crt
+            # Milestone 6: probes the dev-canary variant's own dedicated
+            # Istio ingress gateway (gitops/dev/platform/
+            # istio-ingressgateway-rollouts.yaml), which is deliberately
+            # HTTP-only -- see that Application's comment for why TLS
+            # wasn't wired up there. No Host/tls_config needed: that
+            # gateway's Gateway/VirtualService both match hosts: ["*"].
+            http:
+              prober: http
+              timeout: 5s
+              http:
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                preferred_ip_protocol: "ip4"
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

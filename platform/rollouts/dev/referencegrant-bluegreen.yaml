@@ -1,0 +1,17 @@
+# Same pattern as platform/gateway-api/examples/referencegrant.yaml --
+# lives in the target namespace, granting gateway-api-examples' HTTPRoutes
+# permission to reference a Service here (both the active and preview
+# Services template-test-1-bluegreen's Rollout manages).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-api-examples-routes
+  namespace: template-test-1-bluegreen
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gateway-api-examples
+  to:
+    - group: ""
+      kind: Service

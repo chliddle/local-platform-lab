@@ -1,0 +1,33 @@
+# Dev only -- prod has no Prometheus (accepted gap, see
+# gitops/dev/platform/kube-prometheus-stack.yaml's comment), so a prod
+# canary can't get automated analysis; its Rollout has no `analysis`
+# block at all. Queries the exact metrics/labels
+# platform/grafana-dashboards/app-http-metrics.json's own "by pod" panels
+# already use, scoped to just the canary ReplicaSet via
+# rollouts_pod_template_hash -- underscored, not hyphenated: the OTel
+# Collector's kubernetes_sd_configs labelmap (gitops/dev/platform/
+# otel-collector.yaml) sanitizes the pod label's hyphens the same way
+# Prometheus's own label-name rules require everywhere else. canary-hash
+# is supplied by the Rollout itself (deploy/overlays/dev-canary/
+# rollout.yaml: analysis.args, podTemplateHashValue: Latest).
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: template-test-1-success-rate
+  namespace: template-test-1-canary
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    - name: success-rate
+      interval: 30s
+      count: 3
+      successCondition: result[0] >= 0.95
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{namespace="template-test-1-canary", rollouts_pod_template_hash="{{args.canary-hash}}", status=~"2.."}[1m]))
+            /
+            sum(rate(http_requests_total{namespace="template-test-1-canary", rollouts_pod_template_hash="{{args.canary-hash}}"}[1m]))

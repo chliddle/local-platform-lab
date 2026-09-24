@@ -1,0 +1,32 @@
+# Milestone 6: two routes for the blue-green variant, both via the
+# existing shared demo-gateway -- /bluegreen hits the activeService (what
+# real users would see), /bluegreen-preview hits the previewService (the
+# not-yet-promoted version, inspectable before `kubectl argo rollouts
+# promote` cuts it over). That split is the whole point of demonstrating
+# blue-green: the new version is reachable and testable without any live
+# traffic seeing it first.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: template-test-1-bluegreen
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bluegreen-preview
+      backendRefs:
+        - name: template-test-1-preview
+          namespace: template-test-1-bluegreen
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bluegreen
+      backendRefs:
+        - name: template-test-1
+          namespace: template-test-1-bluegreen
+          port: 8080

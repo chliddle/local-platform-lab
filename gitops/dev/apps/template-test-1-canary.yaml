@@ -1,0 +1,27 @@
+# Milestone 6: one of three parallel deployment-strategy comparison
+# variants -- see gitops/dev/apps/template-test-1-{rolling,bluegreen}.yaml
+# and platform/rollouts/. Argo Rollouts canary with native Istio traffic
+# routing + automated Prometheus analysis + automatic rollback -- the
+# "production grade" pattern this comparison is meant to validate.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: template-test-1-canary
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/template-test-1.git
+    targetRevision: main
+    path: deploy/overlays/dev-canary
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: template-test-1-canary
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,32 @@
+# Milestone 6, dev only: platform-owned routing for the three template-
+# test-1 deployment-strategy variants -- same division of responsibility
+# as gateway-hostname-route.yaml (HTTPRoutes/VirtualServices/
+# DestinationRules/AnalysisTemplates are platform-repo-owned, wired in
+# when onboarding, not app-repo concerns). sync-wave 3, same reasoning as
+# gateway-hostname-route.yaml: the HTTPRoutes here need demo-gateway
+# (gateway-api-examples, wave 2) to already exist for their parentRef to
+# resolve.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rollouts-routing
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: main
+    path: platform/rollouts/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: template-test-1-canary
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

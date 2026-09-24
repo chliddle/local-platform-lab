@@ -1,0 +1,25 @@
+# Argo Rollouts manages this VirtualService's http[0].route[] weights
+# live during a canary rollout (see deploy/overlays/dev-canary/
+# rollout.yaml in template-test-1: trafficRouting.istio.virtualService,
+# name/route name must match exactly). The route named "primary" below is
+# the one Rollouts recognizes and rewrites; its initial state (100% to
+# the stable subset) is just steady-state before any rollout is active.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: template-test-1
+  namespace: template-test-1-canary
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - template-test-1-canary
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: template-test-1.template-test-1-canary.svc.cluster.local
+            subset: stable
+            port:
+              number: 8080
+          weight: 100

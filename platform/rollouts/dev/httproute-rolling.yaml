@@ -1,0 +1,21 @@
+# Milestone 6: routes /rolling to the control-group variant (plain
+# Deployment, RollingUpdate) via the existing shared demo-gateway --
+# same Gateway API model as the path-routing example this repo already
+# built in Milestone 5, just pointed at a Milestone 6 namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: template-test-1-rolling
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /rolling
+      backendRefs:
+        - name: template-test-1
+          namespace: template-test-1-rolling
+          port: 8080
