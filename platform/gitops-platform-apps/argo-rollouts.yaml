@@ -1,0 +1,74 @@
+# Milestone 6: canary/blue-green/automated-rollback controller, native
+# Istio traffic-routing support (VirtualService+DestinationRule subsets --
+# confirmed via argo-rollouts' own docs to be built into the controller
+# itself, no separate plugin binary, unlike the newer Gateway API
+# integration). Shared here (not gitops/{dev,prod}/platform) because it
+# runs identically on both clusters -- the dev->prod promotion pattern
+# needs the same Rollout CRDs/controller on both.
+#
+# installCRDs: false -- confirmed live (`helm pull` + measuring the
+# rendered YAML) that these CRDs are 160-240KB EACH (rollout, analysisrun,
+# analysistemplate, clusteranalysistemplate, experiment): comparable to
+# kube-prometheus-stack's CRDs, which hit "etcdserver: request is too
+# large" when Argo CD tried to track them as part of this Application's
+# own status (see kube-prometheus-stack.yaml's comment for the full
+# failure mode) -- not worth risking the same permanently-stuck sync here.
+# Applied out-of-band instead, via scripts/pre-apply-large-crds.sh (same
+# reasoning/fix as ARC's and kube-prometheus-stack's CRDs), on BOTH dev
+# and prod since this controller runs on both.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-rollouts
+    targetRevision: "2.43.2"
+    helm:
+      valuesObject:
+        installCRDs: false
+        controller:
+          # Chart default is 2 (HA) -- this is a single-node Kind lab per
+          # cluster, one replica is enough and halves the footprint.
+          replicas: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          # Standard prometheus.io/* pod-annotation convention (same one
+          # every app onboarded via local-platform-lab-app-template
+          # carries) -- the OTel Collector's kubernetes-pods job
+          # (gitops/dev/platform/otel-collector.yaml) already discovers
+          # and scrapes any pod carrying these, cluster-wide, so the
+          # controller's own rollout_info/rollout_phase metrics need zero
+          # new scrape config. Port 8090 is the chart's fixed
+          # controller.containerPorts.metrics value -- the controller
+          # always serves /metrics there regardless of the chart's
+          # separate metrics.enabled flag (that flag only controls
+          # whether a Service/ServiceMonitor gets created, which this
+          # pod-level scrape doesn't need).
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8090"
+            prometheus.io/path: "/metrics"
+        # dashboard.enabled stays at the chart default (false) -- the
+        # kubectl argo rollouts CLI plus the Grafana dashboards already
+        # built (platform/grafana-dashboards/) cover the same need without
+        # another always-on pod.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
