@@ -41,14 +41,21 @@ repoServer:
     requests:
       cpu: 50m
       memory: 128Mi
-    # cpu limit (Milestone 5, Phase 4): confirmed live on the management
-    # cluster that an uncapped repo-server can burst to 300%+ CPU rendering
-    # a few charts at once and starve the API server on the shared Docker
-    # Desktop VM all three Kind clusters run on -- same risk here whenever
-    # Istio/cert-manager/Gateway API resync together.
+    # cpu limit (Milestone 5, Phase 4): confirmed live that an uncapped
+    # repo-server can burst to 300%+ CPU rendering a few charts at once and
+    # starve the API server on the shared Docker Desktop VM both Kind
+    # clusters run on -- risk whenever Istio/cert-manager/Gateway API
+    # resync together.
+    #
+    # memory: matches values-prod.yaml's sizing -- confirmed live there
+    # that 256Mi OOMKills the repo-server once a cluster renders
+    # kube-prometheus-stack (platform/gitops-platform-apps/, Milestone 5's
+    # redesign) alongside everything else; this cluster renders the exact
+    # same chart set (plus ARC/BuildKit's smaller directory sources), so
+    # sized the same rather than waiting to hit the identical failure here.
     limits:
-      cpu: 300m
-      memory: 256Mi
+      cpu: 500m
+      memory: 768Mi
   # Loosened from the chart's defaults (1s timeout, 3-strike/30s failure
   # window) -- confirmed live that's tight enough for a CPU-*limited*
   # repo-server to trip it during a legitimate (not stuck) heavy render,

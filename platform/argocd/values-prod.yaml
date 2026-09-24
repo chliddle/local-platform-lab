@@ -39,14 +39,23 @@ repoServer:
     requests:
       cpu: 50m
       memory: 128Mi
-    # cpu limit (Milestone 5, Phase 4): confirmed live on the management
-    # cluster that an uncapped repo-server can burst to 300%+ CPU rendering
-    # a few charts at once and starve the API server on the shared Docker
-    # Desktop VM all three Kind clusters run on -- same risk here whenever
-    # Istio/cert-manager/Gateway API resync together.
+    # cpu limit (Milestone 5, Phase 4): confirmed live that an uncapped
+    # repo-server can burst to 300%+ CPU rendering a few charts at once and
+    # starve the API server on the shared Docker Desktop VM both Kind
+    # clusters run on -- risk whenever Istio/cert-manager/Gateway API
+    # resync together.
+    #
+    # memory 256Mi OOMKilled the repo-server live (confirmed via dmesg:
+    # "Memory cgroup out of memory: Killed process ... argocd-repo-ser",
+    # helm subprocesses killed alongside it) once this cluster started
+    # rendering kube-prometheus-stack (platform/gitops-platform-apps/,
+    # Milestone 5's redesign) on top of its existing Istio/cert-manager/
+    # Gateway API charts -- a genuinely large chart (Prometheus Operator +
+    # CRDs + Grafana + Alertmanager subcharts). Matches what the old
+    # management cluster's repo-server needed for the same chart.
     limits:
-      cpu: 300m
-      memory: 256Mi
+      cpu: 500m
+      memory: 768Mi
   # Loosened from the chart's defaults (1s timeout, 3-strike/30s failure
   # window) -- confirmed live that's tight enough for a CPU-*limited*
   # repo-server to trip it during a legitimate (not stuck) heavy render,
