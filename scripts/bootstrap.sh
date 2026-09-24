@@ -148,6 +148,31 @@ while true; do
   sleep 15
 done
 
+# Belt-and-suspenders on top of the Application-level check above: Argo
+# CD's health assessment for Deployments/StatefulSets/DaemonSets already
+# implies their pods are Ready in the common case, but doesn't cover
+# everything (one-shot Jobs, resource kinds its health check doesn't model
+# closely) -- and doesn't guarantee every pod is READY at the exact instant
+# health flips to true. Confirmed live this matters: check this directly.
+echo "==> Waiting for every pod cluster-wide to be Ready"
+# Excludes Succeeded/Failed pods -- completed Helm hook Jobs (e.g.
+# kube-prometheus-stack's admission-webhook cert generator) leave a pod
+# behind in Succeeded phase that will never satisfy condition=Ready;
+# without this filter the wait just burns its full timeout on those.
+KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
+  --field-selector=status.phase!=Succeeded,status.phase!=Failed --timeout=300s
+
+# Real settle time before this script returns -- and before scripts/up.sh
+# starts the next environment's bootstrap. Confirmed live (this session)
+# that "Applications report Healthy" is not the same as "load has actually
+# stopped": a shared disruption hit all three clusters' control planes
+# minutes after they'd each reported healthy, consistent with residual
+# reconcile/cache-warming work (or simply CPU easing back down) still in
+# flight right after the health gate passes. Cheap insurance against
+# starting the next cluster's own reconcile storm on top of that tail.
+echo "==> Settling for 60s before considering ${env_name} done"
+sleep 60
+
 echo "==> Merging context into ~/.kube/config"
 context_name="kind-${cluster_name}"
 mkdir -p "${HOME}/.kube"
