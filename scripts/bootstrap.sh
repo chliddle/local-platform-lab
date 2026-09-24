@@ -120,19 +120,24 @@ fi
 # even the real Kubernetes control plane (kube-controller-manager,
 # kube-scheduler) lose leader election. One environment fully settled
 # before the next one starts is slower end to end but doesn't compound.
-# blackbox-exporter on management can never reach Healthy at this point in
-# scripts/up.sh's sequence: it needs the blackbox-target-cas Secret, which
-# only scripts/sync-monitoring-targets.sh can create (it reads dev/prod's
-# live root CA certs) -- and that script runs *after* all three clusters
-# are bootstrapped, since it needs dev/prod to already exist. A genuine
-# circular dependency for a fresh bootstrap specifically, not a bug in
-# blackbox-exporter itself -- skip it here rather than hang until the 30
-# minute deadline. `make up` calls sync-monitoring-targets.sh right after
-# all three bootstraps finish, which unblocks it for real.
+# Same story on all three environments, two different Applications: each
+# needs a Secret/ConfigMap only scripts/sync-monitoring-targets.sh can
+# create, and that script only runs *after* all three clusters are
+# bootstrapped (it needs dev/prod's live CA certs and management's live
+# NodePort, none of which exist until every cluster in the chain is up).
+# Genuine circular dependencies for a fresh bootstrap specifically, not
+# bugs in either Application -- skip them here rather than hang until the
+# 30 minute deadline. `make up` calls sync-monitoring-targets.sh right
+# after all three bootstraps finish, which unblocks both for real.
+#   - management/blackbox-exporter: blackbox-target-cas Secret (dev/prod's
+#     root CA certs).
+#   - dev, prod/otel-collector-agent: management-endpoints ConfigMap
+#     (management's OTel Collector NodePort).
 skip_apps=""
-if [ "$env_name" = "management" ]; then
-  skip_apps="blackbox-exporter"
-fi
+case "$env_name" in
+  management) skip_apps="blackbox-exporter" ;;
+  dev | prod) skip_apps="otel-collector-agent" ;;
+esac
 
 echo "==> Waiting for every Application to be Synced+Healthy (can take a while on a fresh bootstrap -- chart/image pulls for everything at once)"
 deadline=$((SECONDS + 1800))
@@ -176,14 +181,15 @@ echo "==> Waiting for every pod cluster-wide to be Ready"
 # kube-prometheus-stack's admission-webhook cert generator) leave a pod
 # behind in Succeeded phase that will never satisfy condition=Ready;
 # without this filter the wait just burns its full timeout on those.
-# Also excludes blackbox-exporter's pod on management, same circular
-# dependency as the Application-level skip above -- it's stuck
-# ContainerCreating (missing Secret) until sync-monitoring-targets.sh runs
-# later in scripts/up.sh's sequence, not actually broken.
-pod_selector="app.kubernetes.io/instance!=blackbox-exporter"
-if [ "$env_name" != "management" ]; then
-  pod_selector=""
-fi
+# Also excludes whichever pod has the same circular dependency as the
+# Application-level skip above -- stuck ContainerCreating (missing Secret/
+# ConfigMap) until sync-monitoring-targets.sh runs later in scripts/up.sh's
+# sequence, not actually broken.
+pod_selector=""
+case "$env_name" in
+  management) pod_selector="app.kubernetes.io/instance!=blackbox-exporter" ;;
+  dev | prod) pod_selector="app.kubernetes.io/instance!=otel-collector-agent" ;;
+esac
 KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
   --field-selector=status.phase!=Succeeded,status.phase!=Failed \
   ${pod_selector:+-l "$pod_selector"} --timeout=300s
