@@ -12,12 +12,27 @@ needs debugging or redoing by hand.
 ## The chain
 
 ```
-curl https://template-test-1.dev.platform.local/
+curl https://template-test-1.dev.platform.local:<nodePort>/
   -> macOS resolver: *.platform.local -> dnsmasq (127.0.0.2:53)
-  -> dnsmasq: dev.platform.local -> <dev's Gateway IP, e.g. 172.18.255.200>
+  -> dnsmasq: dev.platform.local -> <dev's Kind node IP, e.g. 172.18.0.2>
   -> Mac's routing table: 172.18.0.0/16 -> docker-mac-net-connect's WireGuard tunnel
-  -> Istio Gateway (MetalLB-assigned LoadBalancer IP) -> HTTPRoute -> app
+  -> Istio Gateway (NodePort Service on that node) -> HTTPRoute -> app
 ```
+
+The `<nodePort>` suffix is unavoidable, not an oversight: Milestone 6
+dropped MetalLB (confirmed live it was 4 pods / 8 containers with zero
+`resources` set on any of them -- unbounded, this project's recurring
+failure pattern) in favor of Istio's native `networking.istio.io/
+service-type: NodePort` annotation on the Gateway
+(`platform/gateway-api/examples/gateway.yaml`). DNS has no way to encode a
+port, so both `scripts/sync-monitoring-targets.sh` and
+`scripts/setup-local-dns.sh` read the live nodePort (`kubectl get svc
+demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}'`)
+the same way they already read the node's container IP -- see either
+script's comments for the full reasoning, including why
+`Gateway.status.addresses` can't be used instead (it reports a
+cluster-internal Service hostname once the generated Service isn't type
+LoadBalancer, confirmed live).
 
 Three independent things have to work for that to succeed, and each maps to
 one script:
@@ -52,9 +67,12 @@ docker-mac-net-connect`, then the sudo version.
 ### 2. `scripts/setup-local-dns.sh` -- resolving `*.{dev,prod}.platform.local`
 
 `dnsmasq` (via Homebrew) resolves `dev.platform.local`/`prod.platform.local`
-to each cluster's live Gateway IP, read fresh from `kubectl` each run (not
-hardcoded -- MetalLB hands out a new IP if a cluster is ever recreated, same
-caveat as `scripts/sync-runner-creds.sh`'s container IPs).
+to each cluster's Kind node container IP, read fresh from `docker inspect`
+each run (not hardcoded -- Kind assigns a new IP if a cluster is ever
+recreated, same caveat as `scripts/sync-runner-creds.sh`'s container IPs).
+The script also prints each cluster's current Gateway nodePort -- DNS can't
+carry a port, so that part has to be appended to the URL by hand (or read
+by whatever script needs it, same live `kubectl get svc` lookup).
 
 macOS's `/etc/resolver/<domain>` mechanism is what scopes this to just
 `*.platform.local` without touching the Mac's system-wide DNS. Two real

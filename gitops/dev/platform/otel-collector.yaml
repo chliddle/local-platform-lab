@@ -59,7 +59,7 @@ spec:
         # exact preset combination's real startup work: acquiring a
         # coordination.k8s.io Lease for clusterMetrics's leader election
         # and k8s_attributes' informers syncing, on a node already running
-        # Istio/cert-manager/MetalLB/Argo CD. Without this, the pod never
+        # Istio/cert-manager/Argo CD. Without this, the pod never
         # reaches Ready at all -- kubelet kills it for a failed liveness
         # probe before startup finishes, every single attempt.
         livenessProbe:

@@ -18,7 +18,7 @@ controller:
     # dmesg on the kind node: "Memory cgroup out of memory: Killed process
     # ... argocd-applicat", anon-rss right at each ceiling) -- dev now
     # carries the combined Application load of its own original scope
-    # (Istio, cert-manager, MetalLB, Gateway API, template-test-1) AND the
+    # (Istio, cert-manager, Gateway API, template-test-1) AND the
     # relocated management scope (ARC, BuildKit, the full observability
     # stack -- see CLAUDE.md's GitHub Actions Runners section), roughly 12
     # Applications total -- more than either cluster carried alone before.

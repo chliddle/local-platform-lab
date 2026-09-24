@@ -234,6 +234,37 @@ Evaluate:
 
 The implementation must allow Gateway API implementations to expose services locally.
 
+**Current status: neither -- dropped in favor of Istio's native NodePort
+exposure (Milestone 6).** MetalLB was built first (Milestone 5) and worked,
+but checked live against the running dev cluster before Milestone 6: 4
+pods / 8 containers (the chart bundles `frr-k8s` by default even in pure
+L2 mode -- heavier than assumed when it was first evaluated), and
+`kubectl get pods -n metallb-system -o json` showed **zero `resources` set
+on any of the 8 containers** -- completely unbounded, the same failure
+pattern (uncapped containers bursting during reconcile) that drove this
+project's Milestone 5 resource-crisis scope reduction on other components.
+Dropped entirely rather than tuned, on both dev and prod.
+
+Replacement: `networking.istio.io/service-type: NodePort`, a documented,
+native Istio annotation on the Gateway resource itself
+(`platform/gateway-api/examples/gateway.yaml`) -- zero new components,
+same `Gateway`/`HTTPRoute`/`VirtualService` model. cloud-provider-kind was
+re-evaluated too and still rejected for the same reason as originally
+(Milestone 5): it runs as a privileged process on the host outside any
+cluster, a worse fit than either MetalLB or plain NodePort for "everything
+reproducible from Git/Terraform."
+
+Real, accepted cost: reaching the Gateway now needs an explicit
+`:<nodePort>` suffix on every URL -- confirmed live that
+`Gateway.status.addresses` reports a useless in-cluster Service hostname
+once the generated Service isn't type LoadBalancer, so
+`scripts/sync-monitoring-targets.sh` and `scripts/setup-local-dns.sh` both
+read the live nodePort the same way they already read the Kind node's own
+container IP. See `docs/local-https-access.md` for the full chain and
+curl examples with the port included. Local DNS/CA-trust/Mac-network
+routing (Milestone 5, Phase 3) are unaffected -- they were never MetalLB's
+job, only the IP source changed.
+
 ---
 
 # DNS

@@ -11,8 +11,9 @@ spec:
   # holds the Application manifests that are byte-identical across every
   # cluster (dev and prod should run the same platform infra); this
   # cluster's own gitops/dev/platform holds only what genuinely can't be
-  # shared (metallb-config.yaml's IP range -- dev/prod's MetalLB instances
-  # share one Docker network and can't hand out overlapping addresses).
+  # shared (e.g. the dev-only observability stack -- see
+  # kube-prometheus-stack.yaml's comment for why it isn't duplicated onto
+  # prod).
   sources:
     - repoURL: https://github.com/chliddle/local-platform-lab.git
       targetRevision: main

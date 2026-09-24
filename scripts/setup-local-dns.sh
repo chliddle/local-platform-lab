@@ -11,10 +11,19 @@
 # see that script for the full explanation).
 #
 # Gateway IPs are read live from each cluster (not hardcoded) but WILL
-# change if a cluster is ever torn down and recreated -- MetalLB's IPAM
-# state resets with the cluster, same caveat already documented for
+# change if a cluster is ever torn down and recreated -- Kind assigns a
+# fresh container IP each time, same caveat already documented for
 # scripts/sync-runner-creds.sh's container IPs. Re-run this script after
 # recreating dev or prod.
+#
+# This resolves *.platform.local to each cluster's own Kind node
+# container IP directly, not a LoadBalancer IP -- Milestone 6 dropped
+# MetalLB (see platform/gateway-api/examples/gateway.yaml's comment) in
+# favor of Istio's native NodePort exposure. DNS can't encode a port, so
+# reaching anything through this now needs an explicit `:<nodePort>`
+# suffix -- see docs/local-https-access.md for the live-read nodePort and
+# full curl examples. This script prints each cluster's nodePort below for
+# convenience, but doesn't (can't) bake it into the DNS entry itself.
 #
 # Runs with real sudo calls, not printed instructions -- meant to be run
 # directly in your own terminal (interactive password/Touch ID prompts
@@ -43,28 +52,32 @@ if [ -z "$dev_node_ip" ] || ! curl -sk -m 2 -o /dev/null "https://${dev_node_ip}
   exit 1
 fi
 
-# The Gateway may not be Programmed yet on a just-bootstrapped cluster
-# (Argo CD reconciles asynchronously -- see scripts/bootstrap.sh) --
-# retry rather than fail immediately.
-echo "==> Waiting for both clusters' Gateway to get an IP (up to 3 min)"
+# The Gateway's Service may not be provisioned yet on a just-bootstrapped
+# cluster (Argo CD reconciles asynchronously -- see scripts/bootstrap.sh)
+# -- retry rather than fail immediately.
+echo "==> Waiting for both clusters' Gateway Service to get a NodePort (up to 3 min)"
 dev_ip=""
 prod_ip=""
+dev_port=""
+prod_port=""
 deadline=$((SECONDS + 180))
-while [ -z "$dev_ip" ] || [ -z "$prod_ip" ]; do
-  dev_ip="$(KUBECONFIG="$dev_kubeconfig" kubectl -n gateway-api-examples get gateway demo-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
-  prod_ip="$(KUBECONFIG="$prod_kubeconfig" kubectl -n gateway-api-examples get gateway demo-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
-  if [ -n "$dev_ip" ] && [ -n "$prod_ip" ]; then
+while [ -z "$dev_ip" ] || [ -z "$prod_ip" ] || [ -z "$dev_port" ] || [ -z "$prod_port" ]; do
+  dev_ip="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' local-platform-dev-control-plane 2>/dev/null || true)"
+  prod_ip="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' local-platform-prod-control-plane 2>/dev/null || true)"
+  dev_port="$(KUBECONFIG="$dev_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+  prod_port="$(KUBECONFIG="$prod_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+  if [ -n "$dev_ip" ] && [ -n "$prod_ip" ] && [ -n "$dev_port" ] && [ -n "$prod_port" ]; then
     break
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "error: timed out waiting for the Gateway to be Programmed on dev and/or prod." >&2
+    echo "error: timed out waiting for the Gateway Service to be provisioned on dev and/or prod." >&2
     exit 1
   fi
   sleep 10
 done
 
-echo "==> dev.platform.local  -> ${dev_ip}"
-echo "==> prod.platform.local -> ${prod_ip}"
+echo "==> dev.platform.local  -> ${dev_ip}  (HTTPS nodePort: ${dev_port})"
+echo "==> prod.platform.local -> ${prod_ip}  (HTTPS nodePort: ${prod_port})"
 
 if ! command -v dnsmasq >/dev/null 2>&1; then
   echo "==> Installing dnsmasq"
@@ -109,7 +122,10 @@ cat <<EOF
 script (or 'sudo ifconfig lo0 alias 127.0.0.2 up' + 'sudo brew services
 restart dnsmasq') if you reboot and DNS stops resolving.
 
+NodePorts are NOT stable across a cluster recreate -- if you tear down and
+rebuild dev/prod, re-run this script and use the newly printed port.
+
 Verify:
   dscacheutil -q host -a name template-test-1.dev.platform.local
-  curl -k https://template-test-1.dev.platform.local/
+  curl -k https://template-test-1.dev.platform.local:${dev_port}/
 EOF

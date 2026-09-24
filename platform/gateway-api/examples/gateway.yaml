@@ -2,8 +2,28 @@
 # istiod auto-creates a GatewayClass named "istio" on startup once it
 # detects the Gateway API CRDs are present. Creating this Gateway is what
 # triggers istiod's Gateway API auto-provisioning: it deploys a proxy
-# Deployment+Service (type LoadBalancer, picked up by MetalLB) for this
-# Gateway automatically -- no separate istio-ingressgateway Helm release.
+# Deployment+Service for this Gateway automatically -- no separate
+# istio-ingressgateway Helm release.
+#
+# networking.istio.io/service-type: NodePort -- Milestone 6: MetalLB (this
+# annotation's previous LoadBalancer default) was dropped. Checked live
+# against the running dev cluster first: MetalLB is 4 pods / 8 containers
+# (the chart bundles frr-k8s even in pure L2 mode) with zero `resources`
+# set on any of them -- unbounded, the same failure pattern that drove
+# this project's earlier resource crises. This annotation is a documented,
+# native Istio feature (no plugin/extra chart), confirmed live: the
+# generated Service's ports keep the exact same NodePort numbers a
+# LoadBalancer Service would have gotten anyway (Kubernetes allocates a
+# NodePort for LoadBalancer-type Services too, by default) -- only the
+# Service's `type` and its EXTERNAL-IP column change; the routing
+# mechanics underneath are identical either way.
+#
+# Real, accepted cost: reaching this Gateway now needs an explicit
+# `:<nodePort>` suffix (read live -- see scripts/sync-monitoring-targets.sh
+# and scripts/setup-local-dns.sh -- since Gateway.status.addresses reports
+# a useless in-cluster Service hostname once the generated Service isn't a
+# LoadBalancer, confirmed live). docs/local-https-access.md has the full
+# curl examples with the port included.
 #
 # HTTPS listener's certificateRefs points at the `gateway-tls` Secret --
 # same name in both clusters, issued by each cluster's own CA with its own
@@ -16,6 +36,8 @@ kind: Gateway
 metadata:
   name: demo-gateway
   namespace: gateway-api-examples
+  annotations:
+    networking.istio.io/service-type: NodePort
 spec:
   gatewayClassName: istio
   listeners:

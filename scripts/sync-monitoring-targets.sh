@@ -2,11 +2,20 @@
 # Wires up the one part of dev's monitoring stack that can't be plain
 # GitOps: blackbox-exporter needs this cluster's own root CA cert (so it
 # can validate *.platform.local's TLS chain without -k/
-# insecure_skip_verify) and this cluster's own Gateway IP as its probe
-# target -- both live values only a script running against the real,
-# already-reconciling cluster can see. Same "script bridges ephemeral
-# infra into GitOps-managed clusters" pattern as scripts/sync-runner-
-# creds.sh -- see that script for why this can't be Terraform/GitOps.
+# insecure_skip_verify) and this cluster's own Gateway node-IP:nodePort as
+# its probe target -- both live values only a script running against the
+# real, already-reconciling cluster can see. Same "script bridges
+# ephemeral infra into GitOps-managed clusters" pattern as scripts/sync-
+# runner-creds.sh -- see that script for why this can't be Terraform/GitOps.
+#
+# node-IP:nodePort, not a LoadBalancer IP: Milestone 6 dropped MetalLB (see
+# platform/gateway-api/examples/gateway.yaml's comment) in favor of Istio's
+# `networking.istio.io/service-type: NodePort`. Confirmed live that
+# Gateway.status.addresses reports a useless in-cluster Service hostname
+# once the generated Service isn't type LoadBalancer -- so this script
+# reads the node's own container IP (same technique
+# scripts/setup-local-dns.sh already used) plus the Service's assigned
+# nodePort instead.
 #
 # dev only: blackbox-exporter (and the observability stack its Probe
 # result feeds into) doesn't run on prod -- confirmed live it doesn't fit
@@ -19,11 +28,12 @@
 # Writes, in dev, namespace monitoring:
 #   - Secret blackbox-target-ca: dev's own root CA cert, mounted into
 #     blackbox-exporter (gitops/dev/platform/blackbox-exporter.yaml).
-#   - Probe template-test-1: dev's own Gateway IP as the static blackbox
-#     probe target.
+#   - Probe template-test-1: dev's own Gateway node-IP:nodePort as the
+#     static blackbox probe target.
 #
-# The Gateway IP is NOT stable across `kind delete`/`create` -- re-run this
-# after recreating dev. Called automatically by scripts/bootstrap.sh.
+# Neither the node IP nor the nodePort is stable across `kind delete`/
+# `create` -- re-run this after recreating dev. Called automatically by
+# scripts/bootstrap.sh.
 #
 # Usage: scripts/sync-monitoring-targets.sh <dev|prod>
 set -euo pipefail
@@ -60,20 +70,21 @@ while ! KUBECONFIG="$kubeconfig" kubectl -n cert-manager get secret "${env_name}
   sleep 10
 done
 
-echo "==> [${env_name}] Waiting for the Gateway IP"
-gw_ip="" deadline=$((SECONDS + 180))
-while [ -z "$gw_ip" ]; do
-  gw_ip="$(KUBECONFIG="$kubeconfig" kubectl -n gateway-api-examples get gateway demo-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
-  if [ -n "$gw_ip" ]; then
+echo "==> [${env_name}] Waiting for the Gateway's node IP and NodePort"
+gw_ip="" gw_port="" deadline=$((SECONDS + 180))
+while [ -z "$gw_ip" ] || [ -z "$gw_port" ]; do
+  gw_ip="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' "local-platform-${env_name}-control-plane" 2>/dev/null || true)"
+  gw_port="$(KUBECONFIG="$kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+  if [ -n "$gw_ip" ] && [ -n "$gw_port" ]; then
     break
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "error: timed out waiting for ${env_name}'s Gateway to be Programmed." >&2
+    echo "error: timed out waiting for ${env_name}'s Gateway Service to be provisioned." >&2
     exit 1
   fi
   sleep 10
 done
-echo "    ${env_name} gateway=${gw_ip}"
+echo "    ${env_name} gateway=${gw_ip}:${gw_port}"
 
 ca_file="$(mktemp)"
 trap 'rm -f "$ca_file"' EXIT
@@ -111,7 +122,7 @@ spec:
   targets:
     staticConfig:
       static:
-        - "https://${gw_ip}/"
+        - "https://${gw_ip}:${gw_port}/"
       labels:
         cluster: ${env_name}
 EOF
