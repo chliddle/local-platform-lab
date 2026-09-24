@@ -18,16 +18,18 @@ controller:
     requests:
       cpu: 100m
       memory: 256Mi
-    # 512Mi OOMKilled the controller live on a from-scratch bootstrap
-    # (confirmed via `kubectl describe pod`, Reason: OOMKilled) -- this
-    # cluster's Applications now include the full monitoring stack (ARC,
-    # BuildKit, kube-prometheus-stack, Loki, Tempo, OTel Collector,
-    # blackbox-exporter), and building its in-memory cache of everything
-    # it watches during the initial sync needs more headroom than the
-    # original Milestone 4 sizing (ARC/BuildKit alone) assumed.
+    # 512Mi, then 768Mi, both OOMKilled the controller live on real
+    # from-scratch bootstraps (confirmed via dmesg: "Memory cgroup out of
+    # memory: Killed process ... (argocd-applicat)", anon-rss right at the
+    # 768Mi ceiling) -- this cluster's Applications now include the full
+    # monitoring stack (ARC, BuildKit, kube-prometheus-stack, Loki, Tempo,
+    # OTel Collector, blackbox-exporter), and building its in-memory cache
+    # of everything it watches needs more headroom than either prior
+    # sizing assumed. Matching repoServer's own budget now instead of
+    # continuing to guess incrementally.
     limits:
       cpu: 200m
-      memory: 768Mi
+      memory: 1024Mi
   readinessProbe:
     timeoutSeconds: 5
     failureThreshold: 6

@@ -79,15 +79,19 @@ spec:
             requests:
               cpu: 50m
               memory: 192Mi
-            # 192Mi OOMKilled Grafana live on startup, confirmed via
-            # `kubectl describe pod` (Reason: OOMKilled) -- this chart's
-            # Grafana version ships a built-in Kubernetes-style apiserver
-            # (dashboard.grafana.app, playlist.grafana.app, alerting.
-            # grafana.app, etc., visible in its own startup logs) with
-            # real baseline memory overhead beyond older Grafana releases.
+            # 192Mi, then 384Mi, both unstable live (probe timeouts,
+            # restarts) -- this chart's Grafana version ships a built-in
+            # Kubernetes-style apiserver (dashboard.grafana.app,
+            # playlist.grafana.app, alerting.grafana.app, etc., visible in
+            # its own startup logs) with real baseline memory overhead
+            # beyond older Grafana releases. Confirmed live this session
+            # multiple other components (Argo CD's controller, Tempo) also
+            # needed more than their previous sizing on this exact
+            # from-scratch bootstrap -- being generous here too rather
+            # than iterating again.
             limits:
               cpu: 150m
-              memory: 384Mi
+              memory: 512Mi
           # Loki + Tempo live in this same cluster (loki.yaml, tempo.yaml)
           # -- plain in-cluster Service DNS, no dynamic-IP problem here.
           additionalDataSources:

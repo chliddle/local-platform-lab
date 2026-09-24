@@ -26,9 +26,13 @@ spec:
               memory: 128Mi
             # Explicit limit, not just a request -- see kube-prometheus-
             # stack.yaml's comment for why this matters on the shared VM.
+            # 192Mi OOMKilled it live (confirmed via dmesg: "Memory cgroup
+            # out of memory: Killed process ... (tempo)") once it was
+            # actually receiving real trace volume from the OTel Collector
+            # rather than sitting idle.
             limits:
               cpu: 100m
-              memory: 192Mi
+              memory: 320Mi
         persistence:
           enabled: true
           size: 1Gi
