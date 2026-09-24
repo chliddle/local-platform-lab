@@ -47,15 +47,18 @@ repoServer:
     # clusters run on -- risk whenever Istio/cert-manager/Gateway API
     # resync together.
     #
-    # memory: matches values-prod.yaml's sizing -- confirmed live there
-    # that 256Mi OOMKills the repo-server once a cluster renders
-    # kube-prometheus-stack (platform/gitops-platform-apps/, Milestone 5's
-    # redesign) alongside everything else; this cluster renders the exact
-    # same chart set (plus ARC/BuildKit's smaller directory sources), so
-    # sized the same rather than waiting to hit the identical failure here.
+    # memory: 256Mi, then 768Mi, both OOMKilled the repo-server live
+    # (confirmed via dmesg, repeated "argocd-repo-ser" kills, 7 container
+    # restarts observed in one sitting) -- this cluster renders
+    # kube-prometheus-stack (a genuinely large chart: Prometheus Operator +
+    # CRDs + Grafana + Alertmanager subcharts) on top of Istio/cert-manager/
+    # Gateway API/ARC, and kept tripping the limit even after the removals
+    # in this same commit reduced the steady-state chart count -- the OOMs
+    # were happening on refresh/render bursts before those removals had a
+    # chance to take effect. Bumped again rather than iterate a third time.
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 1024Mi
   # Loosened from the chart's defaults (1s timeout, 3-strike/30s failure
   # window) -- confirmed live that's tight enough for a CPU-*limited*
   # repo-server to trip it during a legitimate (not stuck) heavy render,
