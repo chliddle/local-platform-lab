@@ -50,8 +50,16 @@ spec:
           # Explicit limit, not just a request -- confirmed live that
           # requests alone don't stop a busy pod from starving the shared
           # Docker Desktop VM all three Kind clusters run on.
+          #
+          # 100m confirmed live as genuinely too tight for this preset
+          # combination on a busy node (Istio/cert-manager/MetalLB/Argo CD
+          # all running): the pod's own health_check endpoint became
+          # unresponsive under its own cgroup's CPU throttling (probe
+          # timeouts and HTTP 503s with overall docker-level CPU on the
+          # node sitting at ~20%, i.e. not a host-wide contention problem,
+          # a too-tight limit on this one pod specifically).
           limits:
-            cpu: 100m
+            cpu: 200m
             memory: 192Mi
         # Loosened from the chart's defaults (no initial delay, 3-strike/
         # 30s failure window) -- confirmed live that's too tight for this
