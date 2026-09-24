@@ -1,19 +1,18 @@
-# Central OTLP ingress point for the whole platform AND this cluster's own
-# collector, both at once: every cluster's OTel Collector (dev/prod's
-# platform/gitops-platform-apps/otel-collector-agent.yaml, and this one's
-# own local presets below) collects metrics/logs/traces and pushes here --
-# either over the loopback-local pipeline (this cluster) or this Service's
-# NodePort (dev/prod, over the shared kind Docker network) -- and it fans
-# out: metrics to Prometheus, logs to Loki, traces to Tempo, all over
-# in-cluster Service DNS. One collector technology everywhere, one push
-# mechanism for everything, replacing the old Prometheus pull-scrape
-# entirely -- no more per-cluster node-exporter/kube-state-metrics.
+# Per-cluster collector, deployed identically to dev and prod (same
+# shared-directory reasoning as kube-prometheus-stack.yaml): collects this
+# cluster's own metrics/logs/traces (hostMetrics/clusterMetrics/
+# logsCollection presets below) and fans out locally, over in-cluster
+# Service DNS, to this same cluster's own Prometheus/Loki/Tempo -- no
+# cross-cluster push, no NodePort, no central collector on a separate
+# management cluster. That design was tried first and dropped (see
+# kube-prometheus-stack.yaml's comment) -- one collector technology per
+# cluster, one local push mechanism, replacing Prometheus pull-scrape
+# entirely (no more node-exporter/kube-state-metrics).
 #
 # -contrib image, not core: confirmed live via `otelcol validate` that the
 # core image's receiver set doesn't include filelog or k8s_cluster (only
 # hostmetrics is in core) -- core is missing exactly what logsCollection
-# and clusterMetrics need. Same image/config shape as
-# otel-collector-agent.yaml, this one just ALSO fans out to the backends.
+# and clusterMetrics need.
 #
 # DaemonSet, not Deployment: filelog/hostmetrics read this node's local
 # /var/log and /proc -- functionally identical to a 1-replica Deployment on
@@ -38,16 +37,6 @@ spec:
         fullnameOverride: otel-collector
         image:
           repository: otel/opentelemetry-collector-contrib
-        service:
-          # This chart only creates a Service by default when mode !=
-          # daemonset -- confirmed live it silently skipped Service
-          # creation entirely here (mode: daemonset below) despite
-          # service.type being set, leaving dev/prod's collectors with no
-          # NodePort to actually reach. Explicit enabled: true is required
-          # for daemonset mode specifically (the chart's own values.yaml
-          # documents this).
-          enabled: true
-          type: NodePort
         resources:
           requests:
             cpu: 75m
@@ -55,18 +44,19 @@ spec:
           # Explicit limit, not just a request -- see kube-prometheus-
           # stack.yaml's comment for why this matters on the shared VM.
           # useGOMEMLIMIT (chart default: true) sets GOMEMLIMIT from this,
-          # so the Go runtime actually respects it. Sized a bit above the
-          # dev/prod agent: this one also fans out to three backends.
+          # so the Go runtime actually respects it.
           limits:
             cpu: 200m
             memory: 320Mi
         # Loosened from the chart's defaults (no initial delay, 3-strike/
-        # 30s failure window) -- confirmed live on dev this is too tight
-        # for this exact preset combination's real startup work (leader
-        # election Lease, k8s_attributes informer sync, logsCollection's
-        # initial /var/log/pods scan) -- see
-        # platform/gitops-platform-apps/otel-collector-agent.yaml's
-        # comment for the full explanation.
+        # 30s failure window) -- confirmed live that's too tight for this
+        # exact preset combination's real startup work: acquiring a
+        # coordination.k8s.io Lease for clusterMetrics's leader election,
+        # k8s_attributes' informers syncing, and logsCollection's initial
+        # scan of /var/log/pods/*/*/*.log on a node already running Istio/
+        # cert-manager/MetalLB/Argo CD. Without this, the pod never reaches
+        # Ready at all -- kubelet kills it for a failed liveness probe
+        # before startup finishes, every single attempt.
         livenessProbe:
           initialDelaySeconds: 30
           periodSeconds: 15

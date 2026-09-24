@@ -1,10 +1,14 @@
 # The ARC controller: manages the AutoscalingRunnerSet/AutoscalingListener/
 # EphemeralRunnerSet/EphemeralRunner CRDs and their Deployments. No GitHub
 # credential of its own -- arc-runners.yaml carries the repo-scoped one.
-# `helm.releaseName: arc` matches the release name this chart was
-# originally installed under via Terraform (Milestone 4), so migrating
-# ownership from Terraform to Argo CD re-applies the exact same computed
-# resource names rather than creating parallel ones.
+#
+# Lives on dev, not a separate management cluster: a 3rd concurrently-
+# reconciling Kind cluster repeatedly starved the shared Docker Desktop VM
+# badly enough to crash-loop the real control planes on all three clusters
+# (confirmed live across several from-scratch bootstraps). dev already
+# tests infra/app changes before they reach prod, so it's the natural home
+# for the platform's own tooling too -- see CLAUDE.md's GitHub Actions
+# Runners section.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

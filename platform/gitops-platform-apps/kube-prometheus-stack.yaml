@@ -1,12 +1,17 @@
-# Prometheus + Alertmanager + Grafana for the whole platform, centralized
-# on the management cluster (CLAUDE.md's stated intent for Milestone 7,
-# pulled forward into Milestone 5) -- not duplicated per cluster. Metrics
-# arrive via OTLP push from every cluster's OTel Collector (this cluster's
-# own gitops/management/platform/otel-collector.yaml, and dev/prod's
-# platform/gitops-platform-apps/otel-collector-agent.yaml), not Prometheus
-# pull-scraping -- kubeStateMetrics/nodeExporter are disabled below because
-# the OTel Collector's hostMetrics/clusterMetrics presets replace them
-# uniformly on all three clusters, one collection mechanism instead of two.
+# Prometheus + Alertmanager + Grafana, deployed identically to both dev and
+# prod (CLAUDE.md's stated intent for Milestone 7, pulled forward into
+# Milestone 5) -- a per-cluster stack, not a centralized one on a separate
+# management cluster. That 3rd-cluster design was tried first and dropped:
+# a management cluster concurrently reconciling alongside dev/prod
+# repeatedly starved the shared Docker Desktop VM badly enough to
+# crash-loop the real control planes (confirmed live across several
+# from-scratch bootstraps). Duplicating the stack costs more steady-state
+# resources per cluster, but each cluster's own OTel Collector
+# (otel-collector.yaml, this same shared directory) now fans out locally
+# instead of pushing cross-cluster -- no NodePort, no remote agent, no
+# management-cluster single point of failure for observability either.
+# kubeStateMetrics/nodeExporter are disabled below because the OTel
+# Collector's hostMetrics/clusterMetrics presets replace them.
 #
 # No storage/PVCs: Prometheus/Alertmanager/Grafana all run on ephemeral
 # emptyDir with short retention -- a deliberate lab-scale choice given the

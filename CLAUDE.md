@@ -96,13 +96,32 @@ user's own machine. Anything that needs to validate an external PR
 (lint/test/build-check) runs on GitHub-hosted runners instead, which are
 safe by design regardless of who opened the PR.
 
-Runners live on a dedicated **management cluster** (Milestone 4), not dev or
-prod: colocating CI compute with application workloads means arbitrary (in a
-supply-chain-compromise scenario, attacker-influenced) workflow code runs in
-the same cluster as production, with the lateral-movement and
-resource-contention risk that implies. The management cluster is also the
-intended home for centralized observability (Milestone 7) rather than
-duplicating a full stack per cluster.
+Runners live on **dev**, not prod: colocating CI compute with *production*
+workloads means arbitrary (in a supply-chain-compromise scenario,
+attacker-influenced) workflow code runs in the same cluster serving real
+traffic, with the lateral-movement and resource-contention risk that
+implies. dev doesn't have that problem -- it already exists to validate
+infra/app changes before they reach prod, so running the platform's own
+CI/build tooling there too is testing the same thing the cluster is for,
+not a new risk category.
+
+**A dedicated 3rd "management" cluster was the original design (Milestone
+4) and was deliberately dropped in Milestone 5**, after repeatedly hitting
+real resource contention: three Kind clusters reconciling concurrently on
+one Docker Desktop VM (14 CPUs on this dev machine) intermittently starved
+the shared VM badly enough to crash-loop the *real* Kubernetes control
+planes (kube-scheduler/kube-controller-manager losing leader election, not
+just application pods) -- confirmed live, repeatedly, across several
+from-scratch bootstraps, even after staggering cluster startup and tuning
+kubeadm's leader-election timing. Two clusters (dev, prod) don't hit this;
+a third consistently did. Losing the management cluster costs the "CI
+compute isolated from GitOps-managed clusters entirely" property the
+original design had -- accepted as the right tradeoff for a local lab on
+a single laptop; a real multi-node production deployment would not need to
+make this tradeoff at all (separate nodes, not a shared VM, removes the
+contention this was solving for). See Milestone 4's Security implications
+for what running the runner and observability stack on dev instead
+specifically changes about the threat model.
 
 ---
 
@@ -657,7 +676,7 @@ change, never write access to the platform repo for the app team.
 │
 ├── terraform/
 │   ├── modules/
-│   └── environments/     # dev, prod, management
+│   └── environments/     # dev, prod
 │
 ├── scripts/
 │
@@ -852,11 +871,8 @@ workflow could reach.
 branch-protected, action-pinned, secret-scanned (GitHub push protection
 + local pre-commit), and Dependabot-enabled. GHCR packages stay private.
 
-## Milestone 4 -- complete
+## Milestone 4 -- complete (redesigned in Milestone 5 -- see below)
 
-* [x] dedicated management Kind cluster (`terraform/environments/management/`,
-  mirrors dev/prod's structure via the shared `kind-cluster` module) --
-  not dev, not prod (see GitHub Actions Runners)
 * [x] self-hosted GitHub Actions runner (GitHub Actions Runner Controller,
   modern `gha-runner-scale-set` charts) for the platform repo, wired up
   per Milestone 3's binding trigger constraint from the start -- verified
@@ -871,22 +887,21 @@ branch-protected, action-pinned, secret-scanned (GitHub push protection
   nothing in this milestone's actual scope required it (see Security
   implications)
 * [x] rootless BuildKit (`moby/buildkit:*-rootless`, pinned to a digest) as
-  a `Deployment`+`Service`+`NetworkPolicy` in the management cluster --
-  no Docker socket mount, no privileged Docker-in-Docker sidecar, ingress
-  restricted to the runner's own namespace. Verified live: a real
-  multi-arch (`linux/amd64`+`linux/arm64`) image built and pushed via
-  buildx's `remote` driver, no changes needed to the actual
-  `docker/build-push-action` step app repos already use -- only the
-  buildx driver setup changes, so wiring this into the app repos'
+  a `Deployment`+`Service`+`NetworkPolicy` -- no Docker socket mount, no
+  privileged Docker-in-Docker sidecar, ingress restricted to the runner's
+  own namespace. Verified live: a real multi-arch (`linux/amd64`+`linux/arm64`)
+  image built and pushed via buildx's `remote` driver, no changes needed to
+  the actual `docker/build-push-action` step app repos already use -- only
+  the buildx driver setup changes, so wiring this into the app repos'
   `ci.yml`/`release.yml` later is a small, low-risk change
-* [x] RBAC scoped to what the runner actually needs: a namespaced
-  `Role` in dev and prod granting `get/list/watch` on
-  `applications.argoproj.io` only (no secrets, no exec, no write verbs --
-  verified live that a delete attempt is rejected as `Forbidden`), and a
-  separate namespaced `Role` in the management cluster letting the
-  runner pod's own ServiceAccount read exactly the two credential Secrets
-  it needs (`dev-argocd-reader`, `prod-argocd-reader`), nothing else in
-  its namespace
+* [x] RBAC scoped to what the runner actually needs: a namespaced `Role`
+  granting `get/list/watch` on `applications.argoproj.io` only (no
+  secrets, no exec, no write verbs -- verified live that a delete attempt
+  is rejected as `Forbidden`), and a separate namespaced `Role` letting the
+  runner pod's own ServiceAccount read exactly the credential Secrets it
+  needs, nothing else in its namespace (see GitHub Actions Runners and
+  Security implications for exactly what and why this changed in
+  Milestone 5)
 * [x] real cross-repo integration testing against the actual dev/prod
   clusters (`ci-integration.yml`) -- verified live pulling real
   Synced/Healthy status for every app in both environments. Supersedes
@@ -896,6 +911,18 @@ branch-protected, action-pinned, secret-scanned (GitHub push protection
   Repository Structure)
 * [x] documented security implications of CI compute sharing infra with
   application workloads -- see below
+
+**Originally built on a dedicated 3rd "management" Kind cluster**
+(`terraform/environments/management/`), isolating CI compute from
+dev/prod entirely. **Dropped in Milestone 5** after repeatedly hitting real
+resource contention on the shared Docker Desktop VM -- see GitHub Actions
+Runners, above, for the full account and why a single-laptop lab doesn't
+have a better option here. ARC, the runner scale set, and BuildKit now run
+on dev (Terraform: `terraform/environments/dev/main.tf`; GitOps:
+`gitops/dev/platform/{arc-controller,arc-runners,buildkit}.yaml`) --
+functionally the same components, same RBAC shape, just relocated. Every
+bullet above still describes the current, live behavior; only *where* it
+runs changed.
 
 ### Security implications
 
@@ -907,24 +934,29 @@ two independent adversarial reviews with no prior context on the design,
 not assumed from the Terraform reading as intended.
 
 * **No path from any pod to the actual host filesystem.** Verified live
-  across all three Kind clusters (dev, prod, management): the only host
-  bind-mounts anywhere are `/lib/modules` (read-only) and Docker-managed
-  named volumes -- nothing mounts a macOS path, anywhere, in any cluster.
-  A full container breakout on a privileged Kind node (see below) lands
-  inside Docker Desktop's shared Linux VM, not on the real host; reaching
-  macOS itself would need a second, separate hypervisor escape that
-  nothing in this project's Kubernetes/Terraform configuration touches
-  either way -- that boundary is Docker Desktop's, not this platform's
-* **Kind nodes running privileged is pre-existing, not new here.** All
-  three Kind node containers (dev, prod, management) run `--privileged`
-  with unconfined seccomp/AppArmor -- verified identical across all
-  three. This is Kind's own architecture (nested containerd needs it),
-  true since Milestone 1, and not something this milestone made worse.
-  What this milestone actually changes is that a privileged node now
-  hosts pods reachable by an automated trigger (`push` to `main`) instead
-  of only by the owner's own `kubectl apply` -- which is exactly why the
-  Milestone 3 trigger constraint (no `pull_request`, ever) is binding
-  rather than advisory
+  across both Kind clusters (dev, prod): the only host bind-mounts
+  anywhere are `/lib/modules` (read-only) and Docker-managed named
+  volumes -- nothing mounts a macOS path, anywhere, in any cluster. A full
+  container breakout on a privileged Kind node (see below) lands inside
+  Docker Desktop's shared Linux VM, not on the real host; reaching macOS
+  itself would need a second, separate hypervisor escape that nothing in
+  this project's Kubernetes/Terraform configuration touches either way --
+  that boundary is Docker Desktop's, not this platform's
+* **Kind nodes running privileged is pre-existing, not new here.** Both
+  Kind node containers (dev, prod) run `--privileged` with unconfined
+  seccomp/AppArmor -- verified identical across both. This is Kind's own
+  architecture (nested containerd needs it), true since Milestone 1, and
+  not something this milestone made worse. What this milestone actually
+  changes is that a privileged node (dev, specifically -- see GitHub
+  Actions Runners) now hosts pods reachable by an automated trigger
+  (`push` to `main`) instead of only by the owner's own `kubectl apply` --
+  which is exactly why the Milestone 3 trigger constraint (no
+  `pull_request`, ever) is binding rather than advisory. Milestone 5's
+  redesign concentrates this on dev specifically: the runner's blast
+  radius is now a compromise of the same cluster used to validate
+  infra/app changes before prod, not an isolated 3rd cluster -- see the
+  credential-blast-radius bullet below for exactly what that pod can and
+  can't reach as a result
 * **Rootless BuildKit's relaxed seccomp/AppArmor is the documented
   upstream trade-off, not a local misconfiguration** -- verified the live
   pod spec matches moby/buildkit's own reference Kubernetes manifest
@@ -947,14 +979,22 @@ not assumed from the Terraform reading as intended.
   to `Administration` only -- confirmed it cannot push code directly
   (a probe write was rejected needing `contents=write`, which this token
   doesn't have). The one real escalation path is `Administration:write`
-  including deploy-key management, so a fully compromised management
-  cluster could add a push-capable deploy key -- but that already
-  requires first fully compromising the cluster, which independently
-  grants direct read of the dev/prod Argo CD tokens anyway; what it adds
-  beyond that is persistence in the platform repo's source past a
-  cluster wipe. The dev/prod reader credential was independently
-  confirmed live to be exactly as narrow as configured (`Forbidden` on
-  secrets, pods, and any write attempt)
+  including deploy-key management, so a fully compromised dev cluster
+  could add a push-capable deploy key -- but that already requires first
+  fully compromising the cluster, which (since Milestone 5's redesign)
+  means direct in-cluster read of dev's own Argo CD Applications, plus
+  dev's copy of prod's reader credential (`prod-argocd-reader`, in the
+  runner's own `arc-runners` namespace, RBAC-scoped to `get` that one
+  named Secret) anyway; what compromising GitHub credentials adds beyond
+  that is persistence in the platform repo's source past a cluster wipe.
+  The prod reader credential was independently confirmed live to be
+  exactly as narrow as configured (`Forbidden` on secrets, pods, and any
+  write attempt). Note the change from the original design: a compromised
+  runner pod's blast radius now directly includes dev itself (it's the
+  same cluster), not just a narrow reader credential into an isolated
+  management cluster -- accepted as part of dropping the 3rd cluster (see
+  GitHub Actions Runners); the reader-credential pattern is kept for prod
+  specifically, since that's still a genuinely separate cluster
 * **The actual widest-blast-radius credential in this whole platform
   predates this milestone and lives outside it**: the classic PAT used
   for Argo CD's git credential and the GHCR pull secret in dev/prod
@@ -974,11 +1014,11 @@ not assumed from the Terraform reading as intended.
   the accepted cost of removing the automated-trigger attack surface
   entirely rather than merely bounding it
 * **Container IPs used for cross-cluster access aren't stable.**
-  `scripts/sync-runner-creds.sh` resolves dev/prod's control-plane
-  container IP on the shared `kind` Docker network at write time; Docker
-  doesn't guarantee the same IP across `kind delete`/`create`, so this
-  script must be re-run after recreating dev, prod, or management, or
-  `ci-integration.yml` will fail against a stale address
+  `scripts/sync-runner-creds.sh` resolves prod's control-plane container IP
+  on the shared `kind` Docker network at write time; Docker doesn't
+  guarantee the same IP across `kind delete`/`create`, so this script must
+  be re-run after recreating dev or prod, or `ci-integration.yml` and
+  `promote-platform.yml` will fail reaching prod against a stale address
 
 ## Milestone 5
 
@@ -988,12 +1028,34 @@ not assumed from the Terraform reading as intended.
 * cert-manager
 * HTTPS application access
 
-In progress. `make up`/`make down` bring the whole platform (all three
-clusters plus the host-level setup local HTTPS access needs) up and down
-in one command each -- see [docs/local-https-access.md](docs/local-https-access.md)
+In progress. `make up`/`make down` bring the whole platform (both clusters
+plus the host-level setup local HTTPS access needs) up and down in one
+command each -- see [docs/local-https-access.md](docs/local-https-access.md)
 for what that host-level setup actually does and why (Mac-to-cluster
 network routing, local DNS, CA trust all need real one-time,
 interactive-sudo setup that can't be silently scripted, by design).
+
+**Originally scoped as Gateway API/Istio/DNS/cert-manager/HTTPS only; two
+things pulled forward from later milestones during this milestone, and one
+architecture decision reversed mid-milestone:**
+
+* Milestone 4's own tooling (ARC, BuildKit) was made GitOps-managed
+  (previously raw Terraform `helm_release`/typed resources -- see
+  Architecture Principle "All major platform components should be
+  installed through Helm or GitOps")
+* Milestone 7's full observability stack (Prometheus, Grafana, Loki,
+  Tempo, OTel Collector, Blackbox Exporter) was pulled forward and built
+  here -- see Milestone 7, below, for what that means for that milestone's
+  own remaining scope
+* **The dedicated management cluster (Milestone 4) was dropped.** Built,
+  then torn down: a 3rd Kind cluster reconciling concurrently with dev and
+  prod on one Docker Desktop VM repeatedly caused real resource
+  contention severe enough to crash-loop the actual Kubernetes control
+  planes, confirmed live across several from-scratch bootstraps -- not a
+  one-off flake. ARC/BuildKit and the observability stack were relocated
+  onto dev (which already needs to run alongside prod anyway) and
+  deployed identically to both dev and prod respectively -- see GitHub
+  Actions Runners and Milestone 7 for the full reasoning on each move.
 
 ## Milestone 6
 
@@ -1004,15 +1066,15 @@ interactive-sudo setup that can't be silently scripted, by design).
 
 ## Milestone 7
 
-* Prometheus
-* Grafana
-* Loki
-* Tempo
-* OpenTelemetry
-* Blackbox Exporter
-* rollout dashboards
-* deployed on the management cluster (Milestone 4), centralized rather
-  than duplicated per cluster
+* [x] Prometheus, Grafana, Loki, Tempo, OpenTelemetry Collector, Blackbox
+  Exporter -- pulled forward into Milestone 5 and built there. Originally
+  planned as a centralized stack on a dedicated management cluster;
+  deployed identically to dev and prod instead once that cluster was
+  dropped (see GitHub Actions Runners and Milestone 5's redesign note) --
+  each cluster's own OTel Collector fans out locally to that same
+  cluster's own Prometheus/Loki/Tempo, no cross-cluster push
+* rollout dashboards -- still pending, needs Milestone 6's Argo Rollouts
+  to exist first (traffic-split/canary/blue-green state to actually chart)
 
 ## Milestone 8
 

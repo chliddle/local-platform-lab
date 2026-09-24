@@ -1,10 +1,10 @@
 name: buildkit check
 
-# Milestone 4, Phase B checkpoint: proves the rootless BuildKit Service in
-# the management cluster can actually build and push a real multi-arch
-# image via buildx's `remote` driver -- the exact mechanism Phase F will
-# later drop into the app repos' ci.yml/release.yml unchanged. Throwaway:
-# pushes to a disposable package, only ever run by hand.
+# Milestone 4, Phase B checkpoint: proves the rootless BuildKit Service on
+# dev (the platform's own tooling cluster) can actually build and push a
+# real multi-arch image via buildx's `remote` driver -- the exact mechanism
+# Phase F will later drop into the app repos' ci.yml/release.yml unchanged.
+# Throwaway: pushes to a disposable package, only ever run by hand.
 on:
   workflow_dispatch: {}
 

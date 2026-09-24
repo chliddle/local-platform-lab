@@ -141,21 +141,19 @@ resource "terraform_data" "argocd_root_app" {
   depends_on = [helm_release.argocd, kubernetes_secret_v1.argocd_repo_creds]
 }
 
-# Milestone 4, Phase C: lets the management cluster's self-hosted CI runner
-# query Argo CD Application sync/health status here for real cross-repo
-# integration testing (does a platform change break an already-onboarded
-# app, and vice versa) -- read-only on exactly one resource type, nothing
-# else. No exec, no secrets, no write verbs.
-resource "kubernetes_service_account_v1" "ci_argocd_reader" {
+# Milestone 5 redesign: dev hosts the platform's self-hosted CI runner
+# directly (no separate management cluster -- see CLAUDE.md's GitHub
+# Actions Runners section for why that was dropped: a 3rd concurrently-
+# reconciling Kind cluster repeatedly starved the shared Docker Desktop VM
+# badly enough to crash-loop the real control planes, confirmed live across
+# several from-scratch bootstraps). The runner's own ServiceAccount reads
+# Applications in THIS cluster's argocd namespace directly -- no remote
+# credential extraction needed to check dev's own health, unlike prod
+# (still a separate cluster, still read remotely -- see
+# scripts/sync-runner-creds.sh and the arc_runners namespace below).
+resource "kubernetes_role_v1" "argocd_application_reader" {
   metadata {
-    name      = "ci-argocd-reader"
-    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
-  }
-}
-
-resource "kubernetes_role_v1" "ci_argocd_reader" {
-  metadata {
-    name      = "ci-argocd-reader"
+    name      = "argocd-application-reader"
     namespace = kubernetes_namespace_v1.argocd.metadata[0].name
   }
 
@@ -166,36 +164,122 @@ resource "kubernetes_role_v1" "ci_argocd_reader" {
   }
 }
 
-resource "kubernetes_role_binding_v1" "ci_argocd_reader" {
+resource "kubernetes_role_binding_v1" "runner_reads_dev_argocd" {
   metadata {
-    name      = "ci-argocd-reader"
+    name      = "runner-reads-dev-argocd"
     namespace = kubernetes_namespace_v1.argocd.metadata[0].name
   }
 
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "Role"
-    name      = kubernetes_role_v1.ci_argocd_reader.metadata[0].name
+    name      = kubernetes_role_v1.argocd_application_reader.metadata[0].name
+  }
+
+  # ARC's own default ServiceAccount for this scale set's runner pods
+  # (confirmed via the EphemeralRunnerSet's pod spec) -- carries no RBAC
+  # until this binding.
+  subject {
+    kind      = "ServiceAccount"
+    name      = "platform-runners-gha-rs-no-permission"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+}
+
+resource "kubernetes_namespace_v1" "arc_systems" {
+  metadata {
+    name = "arc-systems"
+  }
+}
+
+resource "kubernetes_namespace_v1" "arc_runners" {
+  metadata {
+    name = "arc-runners"
+  }
+}
+
+# Fine-grained PAT, scoped only to chliddle/local-platform-lab (Repository
+# administration: Read and write -- the same permission a GitHub App would
+# need for this). Lives only as a Kubernetes Secret in this cluster, never
+# as a GitHub Actions repo secret. `github_token` is the exact key name
+# ARC's gha-runner-scale-set chart expects for PAT-based auth.
+resource "kubernetes_secret_v1" "platform_runner_github_credential" {
+  metadata {
+    name      = "platform-runner-github-credential"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  data = {
+    github_token = var.arc_runner_pat
+  }
+}
+
+# The classic PAT already used for this cluster's own Argo CD repo-creds/
+# GHCR pull secrets (var.github_token, `repo` scope -- already the widest-
+# blast-radius credential in this platform, flagged in Milestone 4's
+# Security implications and left as-is per the user's explicit call),
+# reused here rather than minted fresh, so promote-platform.yml can push
+# the prod branch forward.
+resource "kubernetes_secret_v1" "platform_repo_push_credential" {
+  metadata {
+    name      = "platform-repo-push-credential"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  data = {
+    token = var.github_token
+  }
+}
+
+# Lets runner pods read exactly these named credential Secrets -- named by
+# resource, not a blanket "secrets" grant, so a compromised job still can't
+# read anything else in this namespace (e.g. the ARC runner's own PAT).
+# prod-argocd-reader is written here by scripts/sync-runner-creds.sh (prod
+# is still a separate cluster, so checking it remotely still needs an
+# extracted, portable credential -- unlike dev, see
+# runner_reads_dev_argocd above).
+resource "kubernetes_role_v1" "runner_reads_argocd_creds" {
+  metadata {
+    name      = "runner-reads-argocd-creds"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  rule {
+    api_groups     = [""]
+    resources      = ["secrets"]
+    resource_names = ["prod-argocd-reader", "platform-repo-push-credential"]
+    verbs          = ["get"]
+  }
+}
+
+resource "kubernetes_role_binding_v1" "runner_reads_argocd_creds" {
+  metadata {
+    name      = "runner-reads-argocd-creds"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role_v1.runner_reads_argocd_creds.metadata[0].name
   }
 
   subject {
     kind      = "ServiceAccount"
-    name      = kubernetes_service_account_v1.ci_argocd_reader.metadata[0].name
-    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
+    name      = "platform-runners-gha-rs-no-permission"
+    namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
   }
 }
 
-# Kubernetes 1.24+ no longer auto-creates a long-lived token Secret for a
-# ServiceAccount -- create one explicitly so scripts/sync-runner-creds.sh
-# (run from the host, outside any cluster) has a durable token to read.
-resource "kubernetes_secret_v1" "ci_argocd_reader_token" {
+# Rootless, daemonless image builder -- runner pods build images by talking
+# to it over the network instead (buildx's `remote` driver, wired up in the
+# workflow itself). Namespace stays Terraform-managed (no credential lives
+# here, but this keeps it symmetric with arc-systems/arc-runners rather than
+# a special case); the Deployment/Service/NetworkPolicy themselves are
+# GitOps-managed -- see gitops/dev/platform/buildkit.yaml and
+# platform/buildkit/.
+resource "kubernetes_namespace_v1" "buildkit" {
   metadata {
-    name      = "ci-argocd-reader-token"
-    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
-    annotations = {
-      "kubernetes.io/service-account.name" = kubernetes_service_account_v1.ci_argocd_reader.metadata[0].name
-    }
+    name = "buildkit"
   }
-
-  type = "kubernetes.io/service-account-token"
 }

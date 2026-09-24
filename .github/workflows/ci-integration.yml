@@ -44,27 +44,25 @@ jobs:
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
-      # dev-argocd-reader/prod-argocd-reader (scripts/sync-runner-creds.sh)
-      # live as Secrets in this runner pod's own namespace, not as GitHub
-      # secrets -- read via the pod's own in-cluster ServiceAccount token,
-      # scoped by Terraform to `get` only these two named Secrets (see
-      # terraform/environments/management/main.tf).
+      # This runner's own pod lives ON dev now (Milestone 5 redesign -- see
+      # CLAUDE.md's GitHub Actions Runners section), so dev's own
+      # Applications are checked via direct in-cluster access (the pod's
+      # own ServiceAccount token, scoped by Terraform to get/list/watch
+      # Applications in dev's argocd namespace -- see
+      # terraform/environments/dev/main.tf's runner_reads_dev_argocd
+      # binding). prod is still a genuinely separate cluster, so it's
+      # checked remotely via prod-argocd-reader, a Secret in this pod's own
+      # namespace written by scripts/sync-runner-creds.sh, scoped by
+      # Terraform to `get` only that one named Secret.
       - name: Check Argo CD Application status in dev and prod
         env:
           SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
           SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
         run: |
           fail=0
-          for env in dev prod; do
-            secret_name="${env}-argocd-reader"
-            server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.server}' | base64 -d)
-            token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.token}' | base64 -d)
-            ca_file="$(mktemp)"
-            kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-              -n arc-runners get secret "$secret_name" -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
 
+          check_apps() {
+            local env="$1" server="$2" token="$3" ca_file="$4"
             for app_file in "gitops/${env}/apps/"*.yaml; do
               app_name="$(basename "$app_file" .yaml)"
               sync_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
@@ -77,7 +75,19 @@ jobs:
                 fail=1
               fi
             done
+          }
 
-            rm -f "$ca_file"
-          done
+          check_apps dev "https://kubernetes.default.svc" "$(cat "$SA_TOKEN_PATH")" "$SA_CA_PATH"
+
+          prod_server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.server}' | base64 -d)
+          prod_token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.token}' | base64 -d)
+          prod_ca_file="$(mktemp)"
+          kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.ca\.crt}' | base64 -d >"$prod_ca_file"
+
+          check_apps prod "$prod_server" "$prod_token" "$prod_ca_file"
+          rm -f "$prod_ca_file"
+
           exit "$fail"

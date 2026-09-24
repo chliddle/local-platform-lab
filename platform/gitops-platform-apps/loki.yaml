@@ -1,8 +1,9 @@
 # Single-binary/filesystem Loki -- simplest mode for a lab (no MinIO/object
-# storage, no separate read/write/backend scale-out components). Not
-# exposed cross-cluster: only otel-collector.yaml talks to it, over
-# in-cluster Service DNS -- dev/prod's OTel Collector agents send logs to
-# the central collector, not directly to Loki.
+# storage, no separate read/write/backend scale-out components). Deployed
+# identically to dev and prod (same shared-directory reasoning as
+# kube-prometheus-stack.yaml) -- not exposed cross-cluster: this same
+# cluster's own otel-collector.yaml talks to it over in-cluster Service DNS
+# only.
 #
 # sync-wave 1: no hard dependency on kube-prometheus-stack's CRDs, but kept
 # alongside the other wave-1 monitoring components for a consistent "core

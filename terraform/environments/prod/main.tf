@@ -141,11 +141,15 @@ resource "terraform_data" "argocd_root_app" {
   depends_on = [helm_release.argocd, kubernetes_secret_v1.argocd_repo_creds]
 }
 
-# Milestone 4, Phase C: lets the management cluster's self-hosted CI runner
-# query Argo CD Application sync/health status here for real cross-repo
+# Milestone 4, Phase C, still needed post-Milestone-5-redesign: prod is a
+# genuinely separate cluster from where the self-hosted CI runner lives
+# (dev -- see CLAUDE.md's GitHub Actions Runners section), so checking
+# prod's Argo CD Application sync/health status for real cross-repo
 # integration testing (does a platform change break an already-onboarded
-# app, and vice versa) -- read-only on exactly one resource type, nothing
-# else. No exec, no secrets, no write verbs.
+# app, and vice versa) still needs a portable, extracted credential
+# (scripts/sync-runner-creds.sh copies this ServiceAccount's token into
+# dev's arc-runners namespace) -- read-only on exactly one resource type,
+# nothing else. No exec, no secrets, no write verbs.
 resource "kubernetes_service_account_v1" "ci_argocd_reader" {
   metadata {
     name      = "ci-argocd-reader"

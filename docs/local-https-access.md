@@ -112,9 +112,9 @@ it should ask.
 
 ## Tearing down
 
-`make down` removes all three clusters but deliberately leaves the
-host-level setup above in place (it's inert with no clusters running, and
-reusable on the next `make up` without re-prompting for sudo every cycle).
+`make down` removes both clusters but deliberately leaves the host-level
+setup above in place (it's inert with no clusters running, and reusable on
+the next `make up` without re-prompting for sudo every cycle).
 To remove it too:
 
 ```

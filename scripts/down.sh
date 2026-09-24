@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tears down all three clusters in one command -- the reverse of
+# Tears down both clusters in one command -- the reverse of
 # scripts/up.sh's cluster-bootstrap steps.
 #
 # Deliberately leaves the host-level setup (docker-mac-net-connect,
@@ -15,13 +15,10 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "==> [1/3] Tearing down prod cluster"
+echo "==> [1/2] Tearing down prod cluster"
 "${repo_root}/scripts/teardown.sh" prod
 
-echo "==> [2/3] Tearing down dev cluster"
+echo "==> [2/2] Tearing down dev cluster"
 "${repo_root}/scripts/teardown.sh" dev
-
-echo "==> [3/3] Tearing down management cluster"
-"${repo_root}/scripts/teardown.sh" management
 
 echo "==> Platform is down. Host-level setup (docker-mac-net-connect, dnsmasq, CA trust) left in place -- see this script's header if you want it fully removed."

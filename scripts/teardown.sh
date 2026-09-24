@@ -7,14 +7,14 @@
 # is already the explicit destructive action; a second prompt inside it
 # would just be automation friction, not a real safety gate.
 #
-# Usage: scripts/teardown.sh [dev|prod|management]   (default: dev)
+# Usage: scripts/teardown.sh [dev|prod]   (default: dev)
 set -euo pipefail
 
 env_name="${1:-dev}"
 case "$env_name" in
-  dev | prod | management) ;;
+  dev | prod) ;;
   *)
-    echo "error: unknown environment '${env_name}' (expected dev, prod, or management)" >&2
+    echo "error: unknown environment '${env_name}' (expected dev or prod)" >&2
     exit 1
     ;;
 esac
@@ -35,15 +35,15 @@ context_name="kind-${cluster_name}"
 # Lots of resources in this cluster carry finalizers that can only be
 # cleared by their own owning controller: Argo CD's root/root-platform
 # Applications (resources-finalizer.argocd.argoproj.io -- see
-# platform/argocd/root-app*.yaml), and ARC's AutoscalingRunnerSet/
+# platform/argocd/root-app*.yaml), and, on dev, ARC's AutoscalingRunnerSet/
 # AutoscalingListener/EphemeralRunnerSet CRs (actions.github.com/*
-# finalizers) on management. Each of those controllers is itself being
-# deleted as part of the same `terraform destroy` (its namespace and
-# everything in it go together), so the finalizer can never actually get
-# cleared -- deadlock. Confirmed live tearing down both prod (Argo CD) and
-# management (ARC) this way (Milestone 5, Phase 4). Since the whole
-# cluster is coming down regardless -- `kind delete cluster` moments later
-# -- there's nothing left to cascade to.
+# finalizers). Each of those controllers is itself being deleted as part of
+# the same `terraform destroy` (its namespace and everything in it go
+# together), so the finalizer can never actually get cleared -- deadlock.
+# Confirmed live tearing down both prod (Argo CD) and dev (ARC) this way
+# (Milestone 5, Phase 4). Since the whole cluster is coming down regardless
+# -- `kind delete cluster` moments later -- there's nothing left to cascade
+# to.
 #
 # Clearing finalizers alone isn't enough (also confirmed live), for two
 # separate reasons:

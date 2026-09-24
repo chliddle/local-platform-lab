@@ -42,33 +42,27 @@ jobs:
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
-      # dev-argocd-reader lives as a Secret in this runner pod's own
-      # namespace (scripts/sync-runner-creds.sh), read via the pod's own
-      # in-cluster ServiceAccount token -- same pattern as
-      # ci-integration.yml. Scoped by Terraform to `get` only this named
-      # Secret (see terraform/environments/management/main.tf).
+      # This runner's own pod lives ON dev now (Milestone 5 redesign -- see
+      # CLAUDE.md's GitHub Actions Runners section), so checking dev's own
+      # Applications is direct in-cluster access via the pod's own
+      # ServiceAccount token -- no remote credential extraction needed.
+      # Scoped by Terraform to get/list/watch Applications in the argocd
+      # namespace only (see terraform/environments/dev/main.tf's
+      # runner_reads_dev_argocd binding).
       - name: Wait for every dev Application to be Synced + Healthy
         env:
           SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
           SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
         run: |
-          server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.server}' | base64 -d)
-          token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.token}' | base64 -d)
-          ca_file="$(mktemp)"
-          kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-            -n arc-runners get secret dev-argocd-reader -o jsonpath='{.data.ca\.crt}' | base64 -d >"$ca_file"
-
           deadline=$((SECONDS + 300))
           while true; do
-            app_names=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+            app_names=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
               -n argocd get applications -o jsonpath='{.items[*].metadata.name}')
             not_ready=""
             for name in $app_names; do
-              sync_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+              sync_status=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
                 -n argocd get application "$name" -o jsonpath='{.status.sync.status}')
-              health_status=$(kubectl --server="$server" --token="$token" --certificate-authority="$ca_file" \
+              health_status=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
                 -n argocd get application "$name" -o jsonpath='{.status.health.status}')
               if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
                 not_ready="${not_ready}${name}: sync=${sync_status} health=${health_status}"$'\n'
@@ -81,23 +75,23 @@ jobs:
             if [ "$SECONDS" -ge "$deadline" ]; then
               echo "::error::Timed out waiting for dev to become healthy. Not Synced+Healthy:"
               echo "$not_ready"
-              rm -f "$ca_file"
               exit 1
             fi
             echo "Not yet healthy, retrying in 15s:"
             echo "$not_ready"
             sleep 15
           done
-          rm -f "$ca_file"
 
       # platform-repo-push-credential is the same classic PAT dev/prod's
       # Argo CD/GHCR secrets already use (var.github_token) -- reused
       # rather than a fresh credential, since it's already the
       # widest-blast-radius credential in this platform (Milestone 4's
       # Security implications) and adding another one wouldn't reduce
-      # actual attack surface. Masked immediately: unlike a GitHub Actions
-      # `secrets.*` value, a token read from an in-cluster Secret is NOT
-      # automatically redacted from logs.
+      # actual attack surface. Lives as a Secret in this pod's own
+      # namespace (terraform/environments/dev/main.tf), read via its own
+      # in-cluster ServiceAccount token. Masked immediately: unlike a
+      # GitHub Actions `secrets.*` value, a token read from an in-cluster
+      # Secret is NOT automatically redacted from logs.
       - name: Fast-forward prod to this commit
         env:
           SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token

@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# Recreates a whole environment. All three environments get a Kind cluster
-# + Argo CD + a root Application (dev/prod: gitops/<env>/apps -- onboarded
-# self-service apps; management: gitops/management/platform -- ARC, rootless
-# BuildKit, and this cluster's own platform tooling). Everything past Argo
-# CD itself is GitOps-managed, not applied directly by this script or
-# Terraform -- it becomes ready asynchronously as Argo CD reconciles, same
-# as template-test-1 in dev/prod. Idempotent -- safe to re-run.
+# Recreates a whole environment. Both dev and prod get a Kind cluster +
+# Argo CD + a root Application (gitops/<env>/apps -- onboarded self-service
+# apps) + a root-platform Application (platform/gitops-platform-apps,
+# shared across both clusters, plus gitops/<env>/platform for what
+# genuinely can't be shared -- see root-platform-dev.yaml's comment). dev
+# additionally hosts the platform's own tooling (ARC, rootless BuildKit --
+# see CLAUDE.md's GitHub Actions Runners section for why there's no
+# separate management cluster for this). Everything past Argo CD itself is
+# GitOps-managed, not applied directly by this script or Terraform -- it
+# becomes ready asynchronously as Argo CD reconciles, same as
+# template-test-1. Idempotent -- safe to re-run.
 #
-# Usage: scripts/bootstrap.sh [dev|prod|management]   (default: dev)
+# Usage: scripts/bootstrap.sh [dev|prod]   (default: dev)
 set -euo pipefail
 
 env_name="${1:-dev}"
 case "$env_name" in
-  dev | prod | management) ;;
+  dev | prod) ;;
   *)
-    echo "error: unknown environment '${env_name}' (expected dev, prod, or management)" >&2
+    echo "error: unknown environment '${env_name}' (expected dev or prod)" >&2
     exit 1
     ;;
 esac
@@ -43,17 +47,17 @@ for cmd in kind kubectl helm terraform; do
   fi
 done
 
-# github_username/github_token are needed by all three environments now --
-# each cluster's own Argo CD reads this private repo via the same
-# repo-creds credential template. dev/prod additionally use it for a GHCR
-# imagePullSecret; management additionally needs the ARC runner PAT below.
+# github_username/github_token are needed by both environments -- each
+# cluster's own Argo CD reads this private repo via the same repo-creds
+# credential template, and both use it for a GHCR imagePullSecret. dev
+# additionally needs the ARC runner PAT below.
 if [ -z "${TF_VAR_github_username:-}" ] || [ -z "${TF_VAR_github_token:-}" ]; then
   cat >&2 <<'EOF'
 error: TF_VAR_github_username and TF_VAR_github_token must be set.
 
 This seeds each cluster's Argo CD repo-credentials secret, so it can read
-this private repo (dev/prod additionally use it for a GHCR imagePullSecret,
-so the Kind node can pull the private template-test-1 image).
+this private repo, and its GHCR imagePullSecret, so the Kind node can pull
+the private template-test-1 image.
 
 Create a classic GitHub PAT (not fine-grained -- fine-grained PATs have no
 "Packages" permission at all, so GHCR auth requires classic) with scopes
@@ -69,7 +73,7 @@ EOF
   exit 1
 fi
 
-if [ "$env_name" = "management" ] && [ -z "${TF_VAR_arc_runner_pat:-}" ]; then
+if [ "$env_name" = "dev" ] && [ -z "${TF_VAR_arc_runner_pat:-}" ]; then
   cat >&2 <<'EOF'
 error: TF_VAR_arc_runner_pat must be set.
 
@@ -94,51 +98,38 @@ terraform -chdir="${env_dir}" apply -auto-approve
 kubeconfig_path="$(terraform -chdir="${env_dir}" output -raw kubeconfig_path)"
 cluster_name="$(terraform -chdir="${env_dir}" output -raw cluster_name)"
 
-# Same wait for all three environments now -- everything past Argo CD
-# itself (ARC, BuildKit, onboarded apps) is GitOps-managed and becomes
-# ready asynchronously as Argo CD reconciles.
 argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
 
-# Management runs two charts (ARC, kube-prometheus-stack) with CRDs too
-# large for Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh
+# kube-prometheus-stack (both environments) and ARC (dev only) ship CRDs
+# too large for Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh
 # for the two distinct ways that fails live. Has to happen before the
 # health-wait below: those Applications can never reach Healthy without
 # their CRDs existing first.
-if [ "$env_name" = "management" ]; then
-  echo "==> Pre-applying large CRDs Argo CD can't sync safely (ARC, kube-prometheus-stack)"
-  "${repo_root}/scripts/pre-apply-large-crds.sh"
-fi
+echo "==> Pre-applying large CRDs Argo CD can't sync safely"
+"${repo_root}/scripts/pre-apply-large-crds.sh" "$env_name"
+
+# blackbox-exporter needs a Secret (this cluster's own root CA, copied from
+# cert-manager's namespace) and a Probe (this cluster's own Gateway IP)
+# that only this script can see live -- same reasoning as every other
+# script-bridged value in this project. Runs here, before the health-wait
+# below, so blackbox-exporter's Secret already exists by the time Argo CD
+# gets to it -- avoids the circular "Application can never go healthy
+# without a Secret only a post-bootstrap script creates" trap a cross-
+# cluster version of this hit in an earlier design (see git history).
+echo "==> Syncing this cluster's monitoring targets (CA, blackbox probe)"
+"${repo_root}/scripts/sync-monitoring-targets.sh" "$env_name"
 
 # Waits for every Application (not just argocd-server) to be Synced+Healthy
 # before this script -- and scripts/up.sh, which bootstraps one environment
 # at a time -- moves on. Confirmed live (Milestone 5, Phase 4) this matters:
-# bootstrapping dev/prod/management concurrently let their reconcile storms
+# bootstrapping multiple clusters concurrently let their reconcile storms
 # (first-time chart pulls, CRD registration, webhook cert generation)
 # overlap, which starved the shared Docker Desktop VM badly enough to make
 # even the real Kubernetes control plane (kube-controller-manager,
 # kube-scheduler) lose leader election. One environment fully settled
 # before the next one starts is slower end to end but doesn't compound.
-# Same story on all three environments, two different Applications: each
-# needs a Secret/ConfigMap only scripts/sync-monitoring-targets.sh can
-# create, and that script only runs *after* all three clusters are
-# bootstrapped (it needs dev/prod's live CA certs and management's live
-# NodePort, none of which exist until every cluster in the chain is up).
-# Genuine circular dependencies for a fresh bootstrap specifically, not
-# bugs in either Application -- skip them here rather than hang until the
-# 30 minute deadline. `make up` calls sync-monitoring-targets.sh right
-# after all three bootstraps finish, which unblocks both for real.
-#   - management/blackbox-exporter: blackbox-target-cas Secret (dev/prod's
-#     root CA certs).
-#   - dev, prod/otel-collector-agent: management-endpoints ConfigMap
-#     (management's OTel Collector NodePort).
-skip_apps=""
-case "$env_name" in
-  management) skip_apps="blackbox-exporter" ;;
-  dev | prod) skip_apps="otel-collector-agent" ;;
-esac
-
 echo "==> Waiting for every Application to be Synced+Healthy (can take a while on a fresh bootstrap -- chart/image pulls for everything at once)"
 deadline=$((SECONDS + 1800))
 while true; do
@@ -148,9 +139,6 @@ while true; do
     not_ready="(no Applications registered yet)"
   else
     for name in $app_names; do
-      case " $skip_apps " in
-        *" $name "*) continue ;;
-      esac
       sync_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.sync.status}')"
       health_status="$(KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" get application "$name" -o jsonpath='{.status.health.status}')"
       if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
@@ -181,18 +169,9 @@ echo "==> Waiting for every pod cluster-wide to be Ready"
 # kube-prometheus-stack's admission-webhook cert generator) leave a pod
 # behind in Succeeded phase that will never satisfy condition=Ready;
 # without this filter the wait just burns its full timeout on those.
-# Also excludes whichever pod has the same circular dependency as the
-# Application-level skip above -- stuck ContainerCreating (missing Secret/
-# ConfigMap) until sync-monitoring-targets.sh runs later in scripts/up.sh's
-# sequence, not actually broken.
-pod_selector=""
-case "$env_name" in
-  management) pod_selector="app.kubernetes.io/instance!=blackbox-exporter" ;;
-  dev | prod) pod_selector="app.kubernetes.io/instance!=otel-collector-agent" ;;
-esac
 KUBECONFIG="${kubeconfig_path}" kubectl wait --for=condition=Ready pod --all --all-namespaces \
   --field-selector=status.phase!=Succeeded,status.phase!=Failed \
-  ${pod_selector:+-l "$pod_selector"} --timeout=300s
+  --timeout=300s
 
 # Real settle time before this script returns -- and before scripts/up.sh
 # starts the next environment's bootstrap. Confirmed live (this session)
@@ -262,8 +241,14 @@ Argo CD UI (admin password below, then browse https://localhost:8080):
   kubectl -n ${argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 EOF
 
-if [ "$env_name" = "management" ]; then
+cat <<EOF
+Check the template-test-1 app synced:
+  kubectl -n ${argocd_namespace} get application template-test-1 -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
+EOF
+
+if [ "$env_name" = "dev" ]; then
   cat <<EOF
+
 Check arc-controller/arc-runners/buildkit synced (may take a minute after
 a fresh apply -- Argo CD reconciles these, this script doesn't wait on it):
   kubectl -n ${argocd_namespace} get applications arc-controller arc-runners buildkit
@@ -273,10 +258,5 @@ Check the runner scale set registered with GitHub:
 
 List runner pods (only appear once a workflow run is queued -- minRunners is 0):
   kubectl -n arc-runners get pods
-EOF
-else
-  cat <<EOF
-Check the template-test-1 app synced:
-  kubectl -n ${argocd_namespace} get application template-test-1 -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
 EOF
 fi

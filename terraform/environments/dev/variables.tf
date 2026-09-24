@@ -35,3 +35,13 @@ variable "github_token" {
   sensitive   = true
   description = "Classic GitHub PAT, scopes: repo + read:packages. Set via TF_VAR_github_token env var only -- never commit, never put in a .tfvars file."
 }
+
+# Fine-grained PAT, scoped only to chliddle/local-platform-lab, permission
+# Repository administration: Read and write. Registers the self-hosted ARC
+# runner (dev hosts platform tooling -- see main.tf). Set via
+# TF_VAR_arc_runner_pat, never committed.
+variable "arc_runner_pat" {
+  type        = string
+  sensitive   = true
+  description = "Fine-grained GitHub PAT, scoped only to chliddle/local-platform-lab, permission Repository administration: Read and write. Set via TF_VAR_arc_runner_pat env var only -- never commit, never put in a .tfvars file."
+}
