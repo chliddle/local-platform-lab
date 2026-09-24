@@ -39,6 +39,14 @@ spec:
         image:
           repository: otel/opentelemetry-collector-contrib
         service:
+          # This chart only creates a Service by default when mode !=
+          # daemonset -- confirmed live it silently skipped Service
+          # creation entirely here (mode: daemonset below) despite
+          # service.type being set, leaving dev/prod's collectors with no
+          # NodePort to actually reach. Explicit enabled: true is required
+          # for daemonset mode specifically (the chart's own values.yaml
+          # documents this).
+          enabled: true
           type: NodePort
         resources:
           requests:
