@@ -1,9 +1,9 @@
 # Synthetic HTTPS probe against the real
 # https://template-test-1.dev.platform.local endpoint (Milestone 5, Phase
-# 3). Per-cluster, not shared: prod's copy (gitops/prod/platform/
-# blackbox-exporter.yaml) probes its own hostname and mounts its own CA --
-# genuinely different config, same shape as cert-manager-ca.yaml/
-# metallb-config.yaml.
+# 3). dev only, not prod -- see kube-prometheus-stack.yaml's comment: the
+# full observability stack (this cluster's own Prometheus, which is what
+# actually consumes this via the Probe CRD sync-monitoring-targets.sh
+# writes) doesn't fit alongside prod's own workloads on this VM.
 #
 # No -k/insecure_skip_verify -- CLAUDE.md's Synthetic Monitoring section
 # explicitly wants "TLS availability" actually validated, not bypassed.

@@ -1052,10 +1052,17 @@ architecture decision reversed mid-milestone:**
   prod on one Docker Desktop VM repeatedly caused real resource
   contention severe enough to crash-loop the actual Kubernetes control
   planes, confirmed live across several from-scratch bootstraps -- not a
-  one-off flake. ARC/BuildKit and the observability stack were relocated
-  onto dev (which already needs to run alongside prod anyway) and
-  deployed identically to both dev and prod respectively -- see GitHub
-  Actions Runners and Milestone 7 for the full reasoning on each move.
+  one-off flake. ARC/BuildKit relocated onto dev (which already needs to
+  run alongside prod anyway) -- see GitHub Actions Runners for the full
+  reasoning. **The observability stack was first duplicated onto both dev
+  and prod, then pulled back to dev-only after that also failed live**:
+  the VM's total 7.65GiB genuinely can't hold two full copies of
+  Prometheus/Grafana/Loki/Tempo/OTel-Collector on top of everything both
+  clusters already run -- confirmed via real swap exhaustion and pod
+  crash-loops on prod within minutes of both clusters being healthy
+  simultaneously, not a resource-limit tuning problem. prod currently has
+  no observability coverage as a result -- see Milestone 7 for the
+  tradeoff this accepts.
 
 ## Milestone 6
 
@@ -1067,12 +1074,17 @@ architecture decision reversed mid-milestone:**
 ## Milestone 7
 
 * [x] Prometheus, Grafana, Loki, Tempo, OpenTelemetry Collector, Blackbox
-  Exporter -- pulled forward into Milestone 5 and built there. Originally
-  planned as a centralized stack on a dedicated management cluster;
-  deployed identically to dev and prod instead once that cluster was
-  dropped (see GitHub Actions Runners and Milestone 5's redesign note) --
-  each cluster's own OTel Collector fans out locally to that same
-  cluster's own Prometheus/Loki/Tempo, no cross-cluster push
+  Exporter -- pulled forward into Milestone 5 and built there, on **dev
+  only**, not centralized on a dedicated management cluster (the original
+  plan) and not duplicated onto prod either (tried, then reverted -- see
+  Milestone 5's redesign note): confirmed live this VM can't hold two
+  copies of the stack alongside everything else both clusters run.
+  gitops/dev/platform/otel-collector.yaml fans out locally to that same
+  cluster's own Prometheus/Loki/Tempo, no cross-cluster push. **prod has
+  no observability coverage** as a direct consequence -- an accepted gap
+  for a single-laptop lab, not something a real multi-node deployment
+  would need to accept (separate nodes per cluster removes the shared-VM
+  memory ceiling this tradeoff is actually about)
 * rollout dashboards -- still pending, needs Milestone 6's Argo Rollouts
   to exist first (traffic-split/canary/blue-green state to actually chart)
 

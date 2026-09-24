@@ -1,7 +1,8 @@
 # Tempo single-binary, local filesystem backend -- same "lab-scale, no
-# object storage" shape as loki.yaml, deployed identically to dev and prod.
-# Not exposed cross-cluster: this same cluster's own OTel Collector
-# (otel-collector.yaml) forwards to Tempo over plain in-cluster Service DNS.
+# object storage" shape as loki.yaml. dev only, not prod (see
+# kube-prometheus-stack.yaml's comment for why) -- not exposed
+# cross-cluster: this same cluster's own OTel Collector (otel-collector.yaml)
+# forwards to Tempo over plain in-cluster Service DNS.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

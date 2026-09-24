@@ -47,12 +47,14 @@ repoServer:
     #
     # memory 256Mi OOMKilled the repo-server live (confirmed via dmesg:
     # "Memory cgroup out of memory: Killed process ... argocd-repo-ser",
-    # helm subprocesses killed alongside it) once this cluster started
-    # rendering kube-prometheus-stack (platform/gitops-platform-apps/,
-    # Milestone 5's redesign) on top of its existing Istio/cert-manager/
-    # Gateway API charts -- a genuinely large chart (Prometheus Operator +
-    # CRDs + Grafana + Alertmanager subcharts). Matches what the old
-    # management cluster's repo-server needed for the same chart.
+    # helm subprocesses killed alongside it) while this cluster briefly ran
+    # the full observability stack (kube-prometheus-stack, Loki, Tempo)
+    # during Milestone 5's redesign -- that stack was moved to dev-only
+    # after confirming live it doesn't fit alongside prod's own workloads
+    # on this VM (see gitops/dev/platform/kube-prometheus-stack.yaml's
+    # comment), but kept this higher ceiling: it's a ceiling, not a
+    # reservation, and Istio/cert-manager/Gateway API alone are still
+    # enough charts rendering concurrently to be worth the headroom.
     limits:
       cpu: 500m
       memory: 768Mi

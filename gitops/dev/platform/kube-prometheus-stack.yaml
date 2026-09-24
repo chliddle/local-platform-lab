@@ -1,15 +1,18 @@
-# Prometheus + Alertmanager + Grafana, deployed identically to both dev and
-# prod (CLAUDE.md's stated intent for Milestone 7, pulled forward into
-# Milestone 5) -- a per-cluster stack, not a centralized one on a separate
-# management cluster. That 3rd-cluster design was tried first and dropped:
-# a management cluster concurrently reconciling alongside dev/prod
-# repeatedly starved the shared Docker Desktop VM badly enough to
-# crash-loop the real control planes (confirmed live across several
-# from-scratch bootstraps). Duplicating the stack costs more steady-state
-# resources per cluster, but each cluster's own OTel Collector
-# (otel-collector.yaml, this same shared directory) now fans out locally
-# instead of pushing cross-cluster -- no NodePort, no remote agent, no
-# management-cluster single point of failure for observability either.
+# Prometheus + Alertmanager + Grafana, on dev only (CLAUDE.md's stated
+# intent for Milestone 7, pulled forward into Milestone 5) -- not a
+# separate management cluster (tried first and dropped: a 3rd cluster
+# concurrently reconciling alongside dev/prod repeatedly starved the
+# shared Docker Desktop VM badly enough to crash-loop the real control
+# planes), and NOT duplicated onto prod either (also tried: confirmed live
+# the VM's total 7.65GiB genuinely can't hold two full copies of this
+# stack plus everything else both clusters already run -- real, sustained
+# swap exhaustion and pod crash-loops, not a tunable resource-limit
+# problem). This cluster's own OTel Collector (otel-collector.yaml, this
+# same directory) fans out locally to this stack -- prod runs no
+# equivalent collector or backend, so prod currently has no metrics/logs/
+# traces/synthetic-probe coverage at all. Accepted tradeoff for a
+# single-laptop lab; a real deployment wouldn't share one
+# memory-constrained VM across every cluster it runs.
 # kubeStateMetrics/nodeExporter are disabled below because the OTel
 # Collector's hostMetrics/clusterMetrics presets replace them.
 #

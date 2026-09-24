@@ -18,12 +18,17 @@
 #
 # Writes, in THIS cluster, namespace monitoring:
 #   - Secret blackbox-target-ca: this cluster's own root CA cert, mounted
-#     into blackbox-exporter (gitops/{dev,prod}/platform/blackbox-exporter.yaml).
+#     into blackbox-exporter (gitops/dev/platform/blackbox-exporter.yaml).
 #   - Probe template-test-1: this cluster's own Gateway IP as the static
 #     blackbox probe target.
 #
+# dev only: blackbox-exporter (and the observability stack its Probe
+# result feeds into) doesn't run on prod -- confirmed live it doesn't fit
+# in this VM's 7.65GiB alongside everything else both clusters already
+# run (see gitops/dev/platform/kube-prometheus-stack.yaml's comment).
+#
 # The Gateway IP is NOT stable across `kind delete`/`create` -- re-run this
-# after recreating a cluster. Called automatically by scripts/bootstrap.sh.
+# after recreating dev. Called automatically by scripts/bootstrap.sh.
 #
 # Usage: scripts/sync-monitoring-targets.sh <dev|prod>
 set -euo pipefail
@@ -36,6 +41,11 @@ case "$env_name" in
     exit 1
     ;;
 esac
+
+if [ "$env_name" != "dev" ]; then
+  echo "==> ${env_name} runs no observability stack -- nothing to sync."
+  exit 0
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 kubeconfig="${repo_root}/terraform/environments/${env_name}/kubeconfig-local-platform-${env_name}"

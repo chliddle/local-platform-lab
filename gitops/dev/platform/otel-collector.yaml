@@ -1,13 +1,12 @@
-# Per-cluster collector, deployed identically to dev and prod (same
-# shared-directory reasoning as kube-prometheus-stack.yaml): collects this
-# cluster's own metrics/logs/traces (hostMetrics/clusterMetrics/
-# logsCollection presets below) and fans out locally, over in-cluster
-# Service DNS, to this same cluster's own Prometheus/Loki/Tempo -- no
-# cross-cluster push, no NodePort, no central collector on a separate
-# management cluster. That design was tried first and dropped (see
-# kube-prometheus-stack.yaml's comment) -- one collector technology per
-# cluster, one local push mechanism, replacing Prometheus pull-scrape
-# entirely (no more node-exporter/kube-state-metrics).
+# Collector for dev only, not prod (see kube-prometheus-stack.yaml's
+# comment for why): collects this cluster's own metrics/logs/traces
+# (hostMetrics/clusterMetrics/logsCollection presets below) and fans out
+# locally, over in-cluster Service DNS, to this same cluster's own
+# Prometheus/Loki/Tempo -- no cross-cluster push, no NodePort, no central
+# collector on a separate management cluster (that design was tried first
+# and dropped too). One collector technology, one local push mechanism,
+# replacing Prometheus pull-scrape entirely (no more node-exporter/
+# kube-state-metrics).
 #
 # -contrib image, not core: confirmed live via `otelcol validate` that the
 # core image's receiver set doesn't include filelog or k8s_cluster (only
