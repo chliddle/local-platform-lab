@@ -97,21 +97,42 @@ spec:
         grafana:
           resources:
             requests:
-              cpu: 50m
+              cpu: 100m
               memory: 192Mi
-            # 192Mi, then 384Mi, both unstable live (probe timeouts,
-            # restarts) -- this chart's Grafana version ships a built-in
-            # Kubernetes-style apiserver (dashboard.grafana.app,
+            # memory: 192Mi, then 384Mi, both unstable live (probe
+            # timeouts, restarts) -- this chart's Grafana version ships a
+            # built-in Kubernetes-style apiserver (dashboard.grafana.app,
             # playlist.grafana.app, alerting.grafana.app, etc., visible in
             # its own startup logs) with real baseline memory overhead
-            # beyond older Grafana releases. Confirmed live this session
-            # multiple other components (Argo CD's controller, Tempo) also
-            # needed more than their previous sizing on this exact
-            # from-scratch bootstrap -- being generous here too rather
-            # than iterating again.
+            # beyond older Grafana releases.
+            #
+            # cpu: 150m confirmed live (cgroup cpu.stat, exec'd from the
+            # node since the distroless image has no shell) throttled the
+            # container in 7039 of 8258 accounting periods -- 85%, over 22
+            # minutes of accumulated throttled_usec -- once it was under
+            # real usage (dashboard rendering, the k8s-sidecar's admin API
+            # reload calls, live Explore queries) rather than sitting
+            # idle. That starvation is what caused readiness/liveness
+            # probe failures and restarts, not an actual hang.
             limits:
-              cpu: 150m
+              cpu: 500m
               memory: 512Mi
+          # Chart defaults (1s readiness timeout, 30s liveness timeout,
+          # both with tight failure budgets) assume a lightly-loaded
+          # Grafana -- confirmed live those get tripped by the CPU
+          # throttling above even once the cpu limit is raised, since a
+          # legitimately busy (not stuck) render can still take longer
+          # than 1s under any limit. Same loosening this project already
+          # applies everywhere else CPU limits + tight default probes
+          # combine (Argo CD, the repo-server, the OTel Collector).
+          readinessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 6
+            periodSeconds: 15
+          livenessProbe:
+            timeoutSeconds: 10
+            failureThreshold: 6
+            periodSeconds: 15
         # Replaced by the OTel Collector's hostMetrics/clusterMetrics
         # presets (this cluster's own otel-collector.yaml runs them too),
         # pushed via OTLP above instead of scraped.
