@@ -61,14 +61,21 @@ spec:
         # scan of /var/log/pods/*/*/*.log on a node already running Istio/
         # cert-manager/MetalLB/Argo CD. Without this, the pod never
         # reaches Ready at all -- kubelet kills it for a failed liveness
-        # probe before startup finishes, every single attempt.
+        # probe before startup finishes, every single attempt. timeoutSeconds
+        # also explicit, not just left at the chart's 1s default -- also
+        # confirmed live as a second, separate failure mode once the port
+        # *was* listening: "context deadline exceeded (Client.Timeout
+        # exceeded while awaiting headers)" while the collector was busy
+        # with its own initial scans.
         livenessProbe:
           initialDelaySeconds: 30
           periodSeconds: 15
+          timeoutSeconds: 5
           failureThreshold: 6
         readinessProbe:
           initialDelaySeconds: 30
           periodSeconds: 15
+          timeoutSeconds: 5
           failureThreshold: 6
         extraEnvsFrom:
           - configMapRef:
