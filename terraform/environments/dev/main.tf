@@ -270,16 +270,3 @@ resource "kubernetes_role_binding_v1" "runner_reads_argocd_creds" {
     namespace = kubernetes_namespace_v1.arc_runners.metadata[0].name
   }
 }
-
-# Rootless, daemonless image builder -- runner pods build images by talking
-# to it over the network instead (buildx's `remote` driver, wired up in the
-# workflow itself). Namespace stays Terraform-managed (no credential lives
-# here, but this keeps it symmetric with arc-systems/arc-runners rather than
-# a special case); the Deployment/Service/NetworkPolicy themselves are
-# GitOps-managed -- see gitops/dev/platform/buildkit.yaml and
-# platform/buildkit/.
-resource "kubernetes_namespace_v1" "buildkit" {
-  metadata {
-    name = "buildkit"
-  }
-}

@@ -61,8 +61,9 @@ spec:
               limits:
                 cpu: 250m
                 memory: 512Mi
-            # Prometheus 3.x's native OTLP metrics receiver -- same "push,
-            # not pull" pattern as Loki's native OTLP log ingestion.
+            # Prometheus 3.x's native OTLP metrics receiver -- this
+            # cluster's OTel Collector (otel-collector.yaml) pushes here
+            # instead of being pull-scraped.
             enableFeatures:
               - otlp-write-receiver
         alertmanager:
@@ -100,17 +101,6 @@ spec:
             limits:
               cpu: 150m
               memory: 512Mi
-          # Loki + Tempo live in this same cluster (loki.yaml, tempo.yaml)
-          # -- plain in-cluster Service DNS, no dynamic-IP problem here.
-          additionalDataSources:
-            - name: Loki
-              type: loki
-              url: http://loki.monitoring.svc.cluster.local:3100
-              access: proxy
-            - name: Tempo
-              type: tempo
-              url: http://tempo.monitoring.svc.cluster.local:3200
-              access: proxy
         # Replaced by the OTel Collector's hostMetrics/clusterMetrics
         # presets (this cluster's own otel-collector.yaml runs them too),
         # pushed via OTLP above instead of scraped.

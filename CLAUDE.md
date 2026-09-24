@@ -81,9 +81,13 @@ Requirements:
 * runner permissions should follow least privilege
 * consider ephemeral runners
 * a rootless/daemonless image builder (BuildKit rootless or Kaniko) for
-  any workflow that builds a container image -- the host Docker socket
-  and privileged Docker-in-Docker are both host-escape vectors and are
-  not used
+  any workflow that builds a container image on THIS project's own
+  self-hosted runner -- the host Docker socket and privileged
+  Docker-in-Docker are both host-escape vectors and are not used. In
+  practice, no image build currently runs on the self-hosted runner at all
+  (see GitHub Actions Runners, below) -- every app repo builds on
+  GitHub-hosted runners, which have Docker natively and need none of this;
+  the requirement is scoped to what would apply if that ever changed
 
 Document the security implications of allowing CI runners access to a Kubernetes cluster.
 
@@ -122,6 +126,17 @@ make this tradeoff at all (separate nodes, not a shared VM, removes the
 contention this was solving for). See Milestone 4's Security implications
 for what running the runner and observability stack on dev instead
 specifically changes about the threat model.
+
+**Rootless BuildKit (Milestone 4) was removed entirely, later in Milestone
+5.** It existed so the self-hosted runner could build images without a
+Docker socket or privileged DinD -- but no workflow ever actually used it:
+every app repo's real `ci.yml`/`release.yml` already built on GitHub-hosted
+runners (which have Docker natively, no BuildKit needed) from the start,
+and the only thing that ever talked to BuildKit was `buildkit-check.yml`,
+a manual, throwaway proof-of-concept. Confirmed via a repo-wide grep before
+removing it. Deleting a whole Deployment/Service/NetworkPolicy/namespace
+that had zero real consumers cost no functionality and freed real
+resources on an already-constrained VM.
 
 ---
 
@@ -397,6 +412,17 @@ Deploy:
 * OpenTelemetry Collector
 * Blackbox Exporter
 
+**Current status (Milestone 5): Prometheus, Grafana, and OpenTelemetry
+Collector are deployed, metrics only, on dev only -- see Milestone 7 for
+the full reasoning.** Loki, Tempo, and Blackbox Exporter were built, then
+deliberately dropped: real, live testing showed the full stack didn't fit
+this platform's actual resource ceiling (see Milestone 5's redesign note),
+and once cut down to what's actually load-bearing for this project's
+stated main goal -- observing trunk-based promotion and progressive
+delivery -- logs/traces/synthetic-probing weren't it. Revisit if a later
+milestone's own scope genuinely needs them (e.g. Milestone 6's rollout
+analysis might want request-level tracing).
+
 Mimir may be added later for experimentation with scalable metrics storage.
 
 Applications should expose Prometheus metrics.
@@ -415,6 +441,9 @@ Capture:
 # Synthetic Monitoring
 
 Use Blackbox Exporter and/or dedicated synthetic test jobs to continuously test applications.
+
+**Current status: deferred.** Blackbox Exporter was built (Milestone 5)
+then dropped along with Loki/Tempo -- see Observability, above, for why.
 
 Validate:
 
@@ -890,10 +919,14 @@ branch-protected, action-pinned, secret-scanned (GitHub push protection
   a `Deployment`+`Service`+`NetworkPolicy` -- no Docker socket mount, no
   privileged Docker-in-Docker sidecar, ingress restricted to the runner's
   own namespace. Verified live: a real multi-arch (`linux/amd64`+`linux/arm64`)
-  image built and pushed via buildx's `remote` driver, no changes needed to
-  the actual `docker/build-push-action` step app repos already use -- only
-  the buildx driver setup changes, so wiring this into the app repos'
-  `ci.yml`/`release.yml` later is a small, low-risk change
+  image built and pushed via buildx's `remote` driver. **Removed entirely
+  in Milestone 5**: this was built ahead of actual need, and that need
+  never materialized -- app repos' real `ci.yml`/`release.yml` already
+  built on GitHub-hosted runners from the start, so BuildKit had zero real
+  consumers (confirmed via repo-wide grep before deleting it, see GitHub
+  Actions Runners). Deleting an unused Deployment/Service/NetworkPolicy
+  freed real resources on an already VM-constrained laptop for no lost
+  functionality
 * [x] RBAC scoped to what the runner actually needs: a namespaced `Role`
   granting `get/list/watch` on `applications.argoproj.io` only (no
   secrets, no exec, no write verbs -- verified live that a delete attempt
@@ -917,12 +950,14 @@ branch-protected, action-pinned, secret-scanned (GitHub push protection
 dev/prod entirely. **Dropped in Milestone 5** after repeatedly hitting real
 resource contention on the shared Docker Desktop VM -- see GitHub Actions
 Runners, above, for the full account and why a single-laptop lab doesn't
-have a better option here. ARC, the runner scale set, and BuildKit now run
-on dev (Terraform: `terraform/environments/dev/main.tf`; GitOps:
-`gitops/dev/platform/{arc-controller,arc-runners,buildkit}.yaml`) --
-functionally the same components, same RBAC shape, just relocated. Every
-bullet above still describes the current, live behavior; only *where* it
-runs changed.
+have a better option here. ARC and the runner scale set now run on dev
+(Terraform: `terraform/environments/dev/main.tf`; GitOps:
+`gitops/dev/platform/{arc-controller,arc-runners}.yaml`) -- functionally
+the same components, same RBAC shape, just relocated. BuildKit did NOT
+move with them -- it was removed entirely, separately, later in Milestone
+5 (see the BuildKit bullet above and GitHub Actions Runners' own note).
+Every other bullet above still describes the current, live behavior; only
+*where* it runs changed.
 
 ### Security implications
 
@@ -957,18 +992,13 @@ not assumed from the Terraform reading as intended.
   infra/app changes before prod, not an isolated 3rd cluster -- see the
   credential-blast-radius bullet below for exactly what that pod can and
   can't reach as a result
-* **Rootless BuildKit's relaxed seccomp/AppArmor is the documented
-  upstream trade-off, not a local misconfiguration** -- verified the live
-  pod spec matches moby/buildkit's own reference Kubernetes manifest
-  exactly. Its safety model comes from the kernel's unprivileged
-  user-namespace mapping (a `RUN` step's "root" maps back to a real
-  non-root UID outside the build sandbox), not from seccomp filtering;
-  disabling seccomp/AppArmor removes a filtering layer that would
-  otherwise partially defend against a kernel 0-day in namespace
-  handling specifically -- a real but narrow residual risk, not a
-  configuration bug. The buildkitd endpoint itself has no auth of its
-  own (plain TCP); access control is entirely delegated to the
-  `NetworkPolicy` restricting ingress to the runner's namespace
+* **Rootless BuildKit's relaxed seccomp/AppArmor** was a real, understood
+  trade-off while it existed (verified live the pod spec matched
+  moby/buildkit's own reference Kubernetes manifest exactly; safety came
+  from unprivileged user-namespace mapping, not seccomp filtering) -- moot
+  now that BuildKit has been removed entirely (Milestone 5, see GitHub
+  Actions Runners): it had no real consumer, so this attack surface is
+  simply gone rather than mitigated
 * **The runner pod carries no meaningful privilege of its own** --
   verified live: no `hostPath`/`hostNetwork`/`hostPID`, no dind sidecar,
   non-root by the image's own default, zero `ClusterRoleBindings`, and
@@ -1063,6 +1093,17 @@ architecture decision reversed mid-milestone:**
   simultaneously, not a resource-limit tuning problem. prod currently has
   no observability coverage as a result -- see Milestone 7 for the
   tradeoff this accepts.
+* **Loki, Tempo, and Blackbox Exporter were then dropped entirely (dev
+  included), and BuildKit removed.** After the dev-only pivot still left
+  the shared VM under real, sustained CPU/memory pressure (control-plane
+  liveness failures on prod, visible in `htop` as all 14 cores pinned),
+  a further pass cut scope back to what the project's stated main goal
+  actually needs -- metrics to observe trunk-based promotion and
+  progressive delivery, not a full logs/traces/synthetic-probe stack.
+  BuildKit was removed separately, for a different reason: a repo-wide
+  grep confirmed it had zero real consumers (see GitHub Actions Runners).
+  What remains on dev: Prometheus, Grafana, Alertmanager, and a
+  metrics-only OTel Collector.
 
 ## Milestone 6
 
@@ -1073,18 +1114,25 @@ architecture decision reversed mid-milestone:**
 
 ## Milestone 7
 
-* [x] Prometheus, Grafana, Loki, Tempo, OpenTelemetry Collector, Blackbox
-  Exporter -- pulled forward into Milestone 5 and built there, on **dev
-  only**, not centralized on a dedicated management cluster (the original
-  plan) and not duplicated onto prod either (tried, then reverted -- see
-  Milestone 5's redesign note): confirmed live this VM can't hold two
-  copies of the stack alongside everything else both clusters run.
-  gitops/dev/platform/otel-collector.yaml fans out locally to that same
-  cluster's own Prometheus/Loki/Tempo, no cross-cluster push. **prod has
-  no observability coverage** as a direct consequence -- an accepted gap
-  for a single-laptop lab, not something a real multi-node deployment
-  would need to accept (separate nodes per cluster removes the shared-VM
-  memory ceiling this tradeoff is actually about)
+* [x] **Metrics only**: Prometheus, Grafana, Alertmanager, and a
+  metrics-only OpenTelemetry Collector -- pulled forward into Milestone 5
+  and built there, on **dev only**, not centralized on a dedicated
+  management cluster (the original plan) and not duplicated onto prod
+  either (tried, then reverted). gitops/dev/platform/otel-collector.yaml
+  fans out locally to that same cluster's own Prometheus, no
+  cross-cluster push. **prod has no observability coverage** as a direct
+  consequence -- an accepted gap for a single-laptop lab, not something a
+  real multi-node deployment would need to accept (separate nodes per
+  cluster removes the shared-VM memory ceiling this tradeoff is actually
+  about)
+* [ ] Loki, Tempo, Blackbox Exporter -- built, then deliberately dropped
+  (Milestone 5's redesign note): even dev-only, the full stack kept this
+  VM under real, sustained pressure (control-plane liveness failures on
+  prod, all cores pinned). Cut back to what the project's stated main goal
+  needs -- metrics for HTTP requests/deployments to observe trunk-based
+  promotion and progressive delivery -- not logs/traces/synthetic-probing.
+  Revisit only if a later milestone's own scope genuinely needs one of
+  these specifically
 * rollout dashboards -- still pending, needs Milestone 6's Argo Rollouts
   to exist first (traffic-split/canary/blue-green state to actually chart)
 

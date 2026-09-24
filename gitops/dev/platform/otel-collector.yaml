@@ -1,21 +1,22 @@
 # Collector for dev only, not prod (see kube-prometheus-stack.yaml's
-# comment for why): collects this cluster's own metrics/logs/traces
-# (hostMetrics/clusterMetrics/logsCollection presets below) and fans out
-# locally, over in-cluster Service DNS, to this same cluster's own
-# Prometheus/Loki/Tempo -- no cross-cluster push, no NodePort, no central
-# collector on a separate management cluster (that design was tried first
-# and dropped too). One collector technology, one local push mechanism,
-# replacing Prometheus pull-scrape entirely (no more node-exporter/
-# kube-state-metrics).
+# comment for why): collects this cluster's own metrics (hostMetrics/
+# clusterMetrics presets below) and fans out locally, over in-cluster
+# Service DNS, to this same cluster's own Prometheus -- no cross-cluster
+# push, no NodePort, no central collector on a separate management
+# cluster (that design was tried first and dropped too). Metrics only --
+# logs (Loki) and traces (Tempo) were dropped from this platform's scope
+# entirely (too much weight for value not yet being used; the main goal
+# here is HTTP/deployment metrics to observe trunk-based promotion and
+# progressive delivery, not a full LGTM stack). Replaces Prometheus
+# pull-scrape entirely (no more node-exporter/kube-state-metrics).
 #
 # -contrib image, not core: confirmed live via `otelcol validate` that the
-# core image's receiver set doesn't include filelog or k8s_cluster (only
-# hostmetrics is in core) -- core is missing exactly what logsCollection
-# and clusterMetrics need.
+# core image's receiver set doesn't include k8s_cluster (only hostmetrics
+# is in core) -- core is missing exactly what clusterMetrics needs.
 #
-# DaemonSet, not Deployment: filelog/hostmetrics read this node's local
-# /var/log and /proc -- functionally identical to a 1-replica Deployment on
-# this single-node cluster, but semantically the right controller type.
+# DaemonSet, not Deployment: hostmetrics reads this node's local /proc --
+# functionally identical to a 1-replica Deployment on this single-node
+# cluster, but semantically the right controller type.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -38,24 +39,25 @@ spec:
           repository: otel/opentelemetry-collector-contrib
         resources:
           requests:
-            cpu: 75m
-            memory: 160Mi
+            cpu: 50m
+            memory: 128Mi
           # Explicit limit, not just a request -- see kube-prometheus-
           # stack.yaml's comment for why this matters on the shared VM.
           # useGOMEMLIMIT (chart default: true) sets GOMEMLIMIT from this,
-          # so the Go runtime actually respects it.
+          # so the Go runtime actually respects it. Lower than before:
+          # dropping logsCollection removes the /var/log/pods scan, this
+          # pod's single biggest startup cost.
           limits:
-            cpu: 200m
-            memory: 320Mi
+            cpu: 150m
+            memory: 256Mi
         # Loosened from the chart's defaults (no initial delay, 3-strike/
         # 30s failure window) -- confirmed live that's too tight for this
         # exact preset combination's real startup work: acquiring a
-        # coordination.k8s.io Lease for clusterMetrics's leader election,
-        # k8s_attributes' informers syncing, and logsCollection's initial
-        # scan of /var/log/pods/*/*/*.log on a node already running Istio/
-        # cert-manager/MetalLB/Argo CD. Without this, the pod never reaches
-        # Ready at all -- kubelet kills it for a failed liveness probe
-        # before startup finishes, every single attempt.
+        # coordination.k8s.io Lease for clusterMetrics's leader election
+        # and k8s_attributes' informers syncing, on a node already running
+        # Istio/cert-manager/MetalLB/Argo CD. Without this, the pod never
+        # reaches Ready at all -- kubelet kills it for a failed liveness
+        # probe before startup finishes, every single attempt.
         livenessProbe:
           initialDelaySeconds: 30
           periodSeconds: 15
@@ -67,8 +69,6 @@ spec:
           timeoutSeconds: 5
           failureThreshold: 6
         presets:
-          logsCollection:
-            enabled: true
           kubernetesAttributes:
             enabled: true
           hostMetrics:
@@ -88,31 +88,15 @@ spec:
                       - targets: ["${env:MY_POD_IP}:8888"]
           exporters:
             debug: {}
-            otlp/tempo:
-              endpoint: tempo.monitoring.svc.cluster.local:4317
-              tls:
-                insecure: true
-            # Loki 3.x's and Prometheus 3.x's native OTLP ingestion
-            # endpoints -- plain otlphttp, no vendor-specific exporter or
-            # remote-write plugin needed.
-            otlphttp/loki:
-              endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
-              tls:
-                insecure: true
+            # Prometheus 3.x's native OTLP metrics ingestion endpoint --
+            # plain otlphttp, no vendor-specific exporter or remote-write
+            # plugin needed.
             otlphttp/prometheus:
               endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
               tls:
                 insecure: true
           service:
             pipelines:
-              traces:
-                exporters:
-                  - debug
-                  - otlp/tempo
-              logs:
-                exporters:
-                  - debug
-                  - otlphttp/loki
               metrics:
                 exporters:
                   - debug

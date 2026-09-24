@@ -4,12 +4,13 @@
 # apps) + a root-platform Application (platform/gitops-platform-apps,
 # shared across both clusters, plus gitops/<env>/platform for what
 # genuinely can't be shared -- see root-platform-dev.yaml's comment). dev
-# additionally hosts the platform's own tooling (ARC, rootless BuildKit --
-# see CLAUDE.md's GitHub Actions Runners section for why there's no
-# separate management cluster for this). Everything past Argo CD itself is
-# GitOps-managed, not applied directly by this script or Terraform -- it
-# becomes ready asynchronously as Argo CD reconciles, same as
-# template-test-1. Idempotent -- safe to re-run.
+# additionally hosts the platform's own tooling (ARC, the runner scale set)
+# and the observability stack (metrics only -- see CLAUDE.md's GitHub
+# Actions Runners and Observability sections for why there's no separate
+# management cluster and no per-cluster duplication for either). Everything
+# past Argo CD itself is GitOps-managed, not applied directly by this
+# script or Terraform -- it becomes ready asynchronously as Argo CD
+# reconciles, same as template-test-1. Idempotent -- safe to re-run.
 #
 # Usage: scripts/bootstrap.sh [dev|prod]   (default: dev)
 set -euo pipefail
@@ -109,17 +110,6 @@ KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status 
 # their CRDs existing first.
 echo "==> Pre-applying large CRDs Argo CD can't sync safely"
 "${repo_root}/scripts/pre-apply-large-crds.sh" "$env_name"
-
-# blackbox-exporter needs a Secret (this cluster's own root CA, copied from
-# cert-manager's namespace) and a Probe (this cluster's own Gateway IP)
-# that only this script can see live -- same reasoning as every other
-# script-bridged value in this project. Runs here, before the health-wait
-# below, so blackbox-exporter's Secret already exists by the time Argo CD
-# gets to it -- avoids the circular "Application can never go healthy
-# without a Secret only a post-bootstrap script creates" trap a cross-
-# cluster version of this hit in an earlier design (see git history).
-echo "==> Syncing this cluster's monitoring targets (CA, blackbox probe)"
-"${repo_root}/scripts/sync-monitoring-targets.sh" "$env_name"
 
 # Waits for every Application (not just argocd-server) to be Synced+Healthy
 # before this script -- and scripts/up.sh, which bootstraps one environment
@@ -249,9 +239,9 @@ EOF
 if [ "$env_name" = "dev" ]; then
   cat <<EOF
 
-Check arc-controller/arc-runners/buildkit synced (may take a minute after
-a fresh apply -- Argo CD reconciles these, this script doesn't wait on it):
-  kubectl -n ${argocd_namespace} get applications arc-controller arc-runners buildkit
+Check arc-controller/arc-runners synced (may take a minute after a fresh
+apply -- Argo CD reconciles these, this script doesn't wait on it):
+  kubectl -n ${argocd_namespace} get applications arc-controller arc-runners
 
 Check the runner scale set registered with GitHub:
   kubectl -n arc-systems logs -l app.kubernetes.io/name=gha-runner-scale-set-controller --tail=50
