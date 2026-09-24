@@ -1,0 +1,106 @@
+{
+  "title": "Synthetic monitoring (blackbox)",
+  "uid": "synthetic-monitoring",
+  "editable": true,
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["synthetic", "blackbox"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Probe success",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "UP" }, "0": { "text": "DOWN" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "probe_success{job=\"blackbox-template-test-1\"}",
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "HTTP status code",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "probe_http_status_code{job=\"blackbox-template-test-1\"}",
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "TLS certificate expiry",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 604800 },
+              { "color": "green", "value": 2592000 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "probe_ssl_earliest_cert_expiry{job=\"blackbox-template-test-1\"} - time()",
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "End-to-end probe latency",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "probe_duration_seconds{job=\"blackbox-template-test-1\"}",
+          "legendFormat": "{{cluster}} total"
+        },
+        {
+          "expr": "probe_http_duration_seconds{job=\"blackbox-template-test-1\"}",
+          "legendFormat": "{{cluster}} - {{phase}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Probe success over time",
+      "description": "1 = the last probe against https://template-test-1.dev.platform.local succeeded (HTTP success, expected TLS chain validated, per CLAUDE.md's Synthetic Monitoring section); 0 = it failed.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "expr": "probe_success{job=\"blackbox-template-test-1\"}",
+          "legendFormat": "{{cluster}}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,13 +1,15 @@
 # Collector for dev only, not prod (see kube-prometheus-stack.yaml's
-# comment for why): collects this cluster's own metrics (hostMetrics/
-# clusterMetrics presets below) and fans out locally, over in-cluster
-# Service DNS, to this same cluster's own Prometheus -- no cross-cluster
-# push, no NodePort, no central collector on a separate management
-# cluster (that design was tried first and dropped too). Metrics only --
-# logs (Loki) and traces (Tempo) were dropped from this platform's scope
-# entirely (too much weight for value not yet being used; the main goal
-# here is HTTP/deployment metrics to observe trunk-based promotion and
-# progressive delivery, not a full LGTM stack). Replaces Prometheus
+# comment for why): collects this cluster's own infra metrics
+# (hostMetrics/clusterMetrics presets below) AND every onboarded app's own
+# HTTP metrics (dynamic, annotation-driven -- see the kubernetes-pods
+# scrape job below), fanning both out locally, over in-cluster Service
+# DNS, to this same cluster's own Prometheus -- no cross-cluster push, no
+# NodePort, no central collector on a separate management cluster (that
+# design was tried first and dropped too). Metrics only -- logs (Loki) and
+# traces (Tempo) were dropped from this platform's scope entirely (too
+# much weight for value not yet being used; the main goal here is HTTP/
+# deployment metrics to observe trunk-based promotion and progressive
+# delivery, not a full LGTM stack). Replaces Prometheus
 # pull-scrape entirely (no more node-exporter/kube-state-metrics).
 #
 # -contrib image, not core: confirmed live via `otelcol validate` that the
@@ -78,16 +80,66 @@ spec:
           clusterMetrics:
             enabled: true
         config:
-          # Self-telemetry: chart default scrapes every 10s, needless
-          # resolution for this lab's own internal metrics.
           receivers:
             prometheus:
               config:
                 scrape_configs:
+                  # Self-telemetry: chart default scrapes every 10s,
+                  # needless resolution for this lab's own internal metrics.
                   - job_name: opentelemetry-collector
                     scrape_interval: 60s
                     static_configs:
                       - targets: ["${env:MY_POD_IP}:8888"]
+                  # ANY onboarded app's own /metrics, cluster-wide -- zero
+                  # platform-repo config per app. Standard prometheus.io/*
+                  # pod-annotation convention (widely used, not invented
+                  # here): only pods carrying prometheus.io/scrape: "true"
+                  # get scraped, at the port/path their own annotations
+                  # declare. local-platform-lab-app-template's
+                  # deploy/base/deployment.yaml sets these three
+                  # annotations by default, so every app generated from it
+                  # (this platform's actual self-service onboarding path --
+                  # see CLAUDE.md's Repository Structure) is scraped
+                  # automatically the moment its Application manifest is
+                  # committed -- an app team never touches this file.
+                  #
+                  # Scraped per-POD via Kubernetes service discovery, not a
+                  # Service's ClusterIP -- deliberate: a Service-level
+                  # scrape blends every backend pod's requests into one
+                  # aggregate number, which can't distinguish a canary/A-B
+                  # variant from stable once Milestone 6 (Argo Rollouts)
+                  # introduces multiple ReplicaSets behind the same
+                  # Service. Relabeling every pod label onto the metric
+                  # (labelmap below) means whatever label Rollouts uses to
+                  # mark a variant (e.g. rollouts-pod-template-hash) flows
+                  # through automatically -- no further platform change
+                  # needed when that milestone lands either. RBAC for this
+                  # is already granted by the kubernetesAttributes/
+                  # clusterMetrics presets above (cluster-wide pods
+                  # get/list/watch), confirmed via `helm template`.
+                  - job_name: kubernetes-pods
+                    scrape_interval: 30s
+                    kubernetes_sd_configs:
+                      - role: pod
+                    relabel_configs:
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                        action: keep
+                        regex: "true"
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                        action: replace
+                        target_label: __metrics_path__
+                        regex: (.+)
+                      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                        action: replace
+                        regex: ([^:]+)(?::\d+)?;(\d+)
+                        replacement: $1:$2
+                        target_label: __address__
+                      - action: labelmap
+                        regex: __meta_kubernetes_pod_label_(.+)
+                      - source_labels: [__meta_kubernetes_pod_name]
+                        target_label: pod
+                      - source_labels: [__meta_kubernetes_namespace]
+                        target_label: namespace
           exporters:
             debug: {}
             # Prometheus 3.x's native OTLP metrics ingestion endpoint --

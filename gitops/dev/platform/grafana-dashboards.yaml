@@ -1,0 +1,35 @@
+# dev only -- Grafana only runs on dev (see kube-prometheus-stack.yaml's
+# comment). Plain Kustomize directory source: platform/grafana-dashboards/
+# ConfigMap-wraps each dashboard JSON, labeled grafana_dashboard: "1" so
+# kube-prometheus-stack's Grafana sidecar auto-imports it -- no Grafana
+# API/provisioning-file step needed.
+#
+# sync-wave 2: after kube-prometheus-stack (wave 1) so the monitoring
+# namespace and Grafana's sidecar already exist -- not strictly required
+# (the sidecar watches continuously and would pick these up whenever it
+# starts), but keeps this consistent with the project's "core platform
+# first" sync-wave convention.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-dashboards
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: main
+    path: platform/grafana-dashboards
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

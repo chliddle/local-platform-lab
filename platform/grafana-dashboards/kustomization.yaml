@@ -1,0 +1,29 @@
+# Wraps each dashboard JSON in a ConfigMap labeled grafana_dashboard: "1"
+# -- kube-prometheus-stack's Grafana subchart runs a sidecar (enabled by
+# default) that watches for exactly this label across the cluster and
+# auto-imports any ConfigMap carrying it. No Grafana API call, no
+# provisioning file mount to manage by hand -- committing a dashboard JSON
+# here is the whole mechanism.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+configMapGenerator:
+  - name: dashboard-app-http-metrics
+    files:
+      - app-http-metrics.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+      # Kustomize's default content-hash suffix would make Argo CD see a
+      # brand new ConfigMap name every time the dashboard JSON changes --
+      # fine for a Deployment (new name forces a rollout), wrong here
+      # (Grafana's sidecar tracks the ConfigMap by name; a stable name is
+      # what makes an edit look like an update, not a new dashboard).
+      disableNameSuffixHash: true
+  - name: dashboard-synthetic-monitoring
+    files:
+      - synthetic-monitoring.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+      disableNameSuffixHash: true

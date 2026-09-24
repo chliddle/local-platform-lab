@@ -412,20 +412,35 @@ Deploy:
 * OpenTelemetry Collector
 * Blackbox Exporter
 
-**Current status (Milestone 5): Prometheus, Grafana, and OpenTelemetry
-Collector are deployed, metrics only, on dev only -- see Milestone 7 for
-the full reasoning.** Loki, Tempo, and Blackbox Exporter were built, then
+**Current status (Milestone 5): Prometheus, Grafana, OpenTelemetry
+Collector, and Blackbox Exporter are deployed, on dev only -- see
+Milestone 7 for the full reasoning.** Loki and Tempo were built, then
 deliberately dropped: real, live testing showed the full stack didn't fit
 this platform's actual resource ceiling (see Milestone 5's redesign note),
 and once cut down to what's actually load-bearing for this project's
 stated main goal -- observing trunk-based promotion and progressive
-delivery -- logs/traces/synthetic-probing weren't it. Revisit if a later
+delivery -- logs/traces weren't it. Blackbox Exporter was dropped in that
+same pass, then re-added once metrics-for-HTTP-requests work made
+synthetic checks worth having again. Revisit Loki/Tempo if a later
 milestone's own scope genuinely needs them (e.g. Milestone 6's rollout
 analysis might want request-level tracing).
 
 Mimir may be added later for experimentation with scalable metrics storage.
 
-Applications should expose Prometheus metrics.
+**Applications expose Prometheus metrics, and get scraped with zero
+platform-repo or app-team configuration.** Every app generated from
+`local-platform-lab-app-template` carries `prometheus.io/scrape: "true"`,
+`prometheus.io/port`, `prometheus.io/path` pod annotations by default
+(the app-template's own `deploy/base/deployment.yaml`) -- this cluster's
+OTel Collector (`gitops/dev/platform/otel-collector.yaml`) discovers and
+scrapes any pod carrying them, cluster-wide, via the standard
+`prometheus.io/*` annotation convention (not invented here -- one of the
+most common Kubernetes+Prometheus patterns). Onboarding a new app's
+monitoring is exactly "commit its Application manifest," same as
+onboarding the app itself -- no separate monitoring config, matching this
+platform's self-service model (Repository Structure). An app that needs
+non-default behavior (different port/path, or opting out) overrides those
+three annotations in its own repo; nothing more.
 
 Capture:
 
@@ -436,14 +451,31 @@ Capture:
 * rollout state
 * Kubernetes metrics
 
+**Dashboards**: `platform/grafana-dashboards/` (Kustomize-wrapped
+ConfigMaps labeled `grafana_dashboard: "1"`, auto-imported by
+kube-prometheus-stack's Grafana sidecar -- no Grafana API/provisioning
+step). `app-http-metrics.json` breaks success/error rate and latency down
+by `pod`, not just aggregated -- deliberately, so a canary/A-B/dark-launch
+variant (Milestone 6, Argo Rollouts) shows up as its own line the moment
+it exists as a separate pod behind the same Service, with zero dashboard
+changes needed when that milestone lands.
+
 ---
 
 # Synthetic Monitoring
 
 Use Blackbox Exporter and/or dedicated synthetic test jobs to continuously test applications.
 
-**Current status: deferred.** Blackbox Exporter was built (Milestone 5)
-then dropped along with Loki/Tempo -- see Observability, above, for why.
+**Current status: deployed (dev only).** Blackbox Exporter probes the real
+`https://template-test-1.dev.platform.local` endpoint -- full TLS chain
+validation, no `-k`/`insecure_skip_verify` (see Observability, above, for
+why dev only). Its target hostname is still hardcoded per-app in
+`gitops/dev/platform/blackbox-exporter.yaml` and
+`scripts/sync-monitoring-targets.sh` -- unlike metrics scraping, this
+hasn't been generalized to auto-discover every onboarded app yet (would
+need enumerating HTTPRoutes or a similar declarative source of "what
+hostnames exist"); revisit once a second onboarded app makes it worth
+building against.
 
 Validate:
 
@@ -1114,27 +1146,34 @@ architecture decision reversed mid-milestone:**
 
 ## Milestone 7
 
-* [x] **Metrics only**: Prometheus, Grafana, Alertmanager, and a
-  metrics-only OpenTelemetry Collector -- pulled forward into Milestone 5
-  and built there, on **dev only**, not centralized on a dedicated
-  management cluster (the original plan) and not duplicated onto prod
-  either (tried, then reverted). gitops/dev/platform/otel-collector.yaml
+* [x] **Metrics + synthetic checks**: Prometheus, Grafana, Alertmanager,
+  Blackbox Exporter, and an OpenTelemetry Collector -- pulled forward into
+  Milestone 5 and built there, on **dev only**, not centralized on a
+  dedicated management cluster (the original plan) and not duplicated onto
+  prod either (tried, then reverted). gitops/dev/platform/otel-collector.yaml
   fans out locally to that same cluster's own Prometheus, no
   cross-cluster push. **prod has no observability coverage** as a direct
   consequence -- an accepted gap for a single-laptop lab, not something a
   real multi-node deployment would need to accept (separate nodes per
   cluster removes the shared-VM memory ceiling this tradeoff is actually
   about)
-* [ ] Loki, Tempo, Blackbox Exporter -- built, then deliberately dropped
-  (Milestone 5's redesign note): even dev-only, the full stack kept this
-  VM under real, sustained pressure (control-plane liveness failures on
-  prod, all cores pinned). Cut back to what the project's stated main goal
-  needs -- metrics for HTTP requests/deployments to observe trunk-based
-  promotion and progressive delivery -- not logs/traces/synthetic-probing.
-  Revisit only if a later milestone's own scope genuinely needs one of
-  these specifically
-* rollout dashboards -- still pending, needs Milestone 6's Argo Rollouts
-  to exist first (traffic-split/canary/blue-green state to actually chart)
+* [ ] Loki, Tempo -- built, then deliberately dropped (Milestone 5's
+  redesign note): even dev-only, the full stack kept this VM under real,
+  sustained pressure (control-plane liveness failures on prod, all cores
+  pinned). Cut back to what the project's stated main goal needs --
+  metrics for HTTP requests/deployments to observe trunk-based promotion
+  and progressive delivery -- not logs/traces. Revisit only if a later
+  milestone's own scope genuinely needs one of these specifically
+* [x] app HTTP metrics, scraped dynamically (Observability section, above)
+  and dashboarded (`platform/grafana-dashboards/app-http-metrics.json`),
+  broken down by pod so a future canary/A-B/dark-launch variant compares
+  cleanly against stable -- built ahead of Milestone 6 existing, since the
+  scrape/dashboard mechanism doesn't depend on Rollouts itself, only on a
+  second ReplicaSet's pods showing up with their own `pod` label
+* rollout-strategy dashboards (traffic-split %, canary vs. stable
+  side-by-side) -- still pending, needs Milestone 6's Argo Rollouts to
+  exist first for there to be a strategy to chart, but the underlying
+  per-pod metrics breakdown is already in place
 
 ## Milestone 8
 

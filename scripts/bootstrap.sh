@@ -103,13 +103,23 @@ argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
 
-# kube-prometheus-stack (both environments) and ARC (dev only) ship CRDs
-# too large for Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh
-# for the two distinct ways that fails live. Has to happen before the
-# health-wait below: those Applications can never reach Healthy without
-# their CRDs existing first.
+# kube-prometheus-stack and ARC (both dev only) ship CRDs too large for
+# Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh for the two
+# distinct ways that fails live. Has to happen before the health-wait
+# below: those Applications can never reach Healthy without their CRDs
+# existing first.
 echo "==> Pre-applying large CRDs Argo CD can't sync safely"
 "${repo_root}/scripts/pre-apply-large-crds.sh" "$env_name"
+
+# blackbox-exporter (dev only) needs a Secret (dev's own root CA, copied
+# from cert-manager's namespace) and a Probe (dev's own Gateway IP) that
+# only this script can see live -- same reasoning as every other
+# script-bridged value in this project. Runs here, before the health-wait
+# below, so blackbox-exporter's Secret already exists by the time Argo CD
+# gets to it -- avoids the circular "Application can never go healthy
+# without a Secret only a post-bootstrap script creates" trap.
+echo "==> Syncing this cluster's monitoring targets (CA, blackbox probe)"
+"${repo_root}/scripts/sync-monitoring-targets.sh" "$env_name"
 
 # Waits for every Application (not just argocd-server) to be Synced+Healthy
 # before this script -- and scripts/up.sh, which bootstraps one environment

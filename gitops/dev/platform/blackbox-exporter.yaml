@@ -1,0 +1,70 @@
+# Synthetic HTTPS probe against the real
+# https://template-test-1.dev.platform.local endpoint (Milestone 5, Phase
+# 3). dev only, not prod -- see kube-prometheus-stack.yaml's comment: the
+# full observability stack (this cluster's own Prometheus, which is what
+# actually consumes this via the Probe CRD sync-monitoring-targets.sh
+# writes) doesn't fit alongside prod's own workloads on this VM.
+#
+# No -k/insecure_skip_verify -- CLAUDE.md's Synthetic Monitoring section
+# explicitly wants "TLS availability" actually validated, not bypassed.
+# The root CA is mounted from a Secret scripts/sync-monitoring-targets.sh
+# copies, in-cluster, from cert-manager's dev-root-ca-secret (cert-manager
+# writes it to the cert-manager namespace; blackbox-exporter needs it in
+# its own namespace -- Secrets don't cross namespaces on their own). Only a
+# script can see this cluster's freshly-generated CA cert content, same
+# reasoning as every other script-bridged value in this project.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox-exporter
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    targetRevision: "11.18.0"
+    helm:
+      releaseName: blackbox-exporter
+      valuesObject:
+        fullnameOverride: blackbox-exporter
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          # Explicit limit, not just a request -- see kube-prometheus-
+          # stack.yaml's comment for why this matters on the shared VM.
+          limits:
+            cpu: 50m
+            memory: 64Mi
+        extraSecretMounts:
+          - name: target-ca
+            mountPath: /etc/blackbox/certs
+            secretName: blackbox-target-ca
+            readOnly: true
+        config:
+          modules:
+            https:
+              prober: http
+              timeout: 5s
+              http:
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                preferred_ip_protocol: "ip4"
+                headers:
+                  Host: template-test-1.dev.platform.local
+                tls_config:
+                  server_name: template-test-1.dev.platform.local
+                  ca_file: /etc/blackbox/certs/ca.crt
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
