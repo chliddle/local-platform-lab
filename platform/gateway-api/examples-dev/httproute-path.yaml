@@ -1,0 +1,29 @@
+# Path routing example (CLAUDE.md, Gateway API section). Per-environment,
+# not shared, since Milestone 6: dev's template-test-1 backend now lives
+# across three separate namespaces (template-test-1-{rolling,bluegreen,
+# canary}), while prod's is still the single unconverted
+# `template-test-1` namespace -- the two environments' backend topology
+# has diverged, so a single shared file can no longer correctly target
+# both. Points at template-test-1-rolling (the control-group variant --
+# a plain Deployment behind a plain Service, the closest match to what
+# this example originally demonstrated before the split). Cross-namespace
+# backendRef, allowed by platform/rollouts/dev/referencegrant-rolling.yaml
+# (Milestone 6) -- no separate ReferenceGrant needed here, that one
+# already covers gateway-api-examples -> template-test-1-rolling.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: template-test-1-path
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /template-test-1
+      backendRefs:
+        - name: template-test-1
+          namespace: template-test-1-rolling
+          port: 8080

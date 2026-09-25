@@ -2,8 +2,12 @@
 # real per-cluster domain now that cert-manager/local DNS exist (Milestone
 # 5, Phase 3) -- superseding the placeholder hostname Phase 2 used before
 # this was wired up. Per-cluster because the hostname genuinely differs
-# (dev vs prod domain); everything else about this route is identical to
-# prod's copy.
+# (dev vs prod domain); everything else about this route was identical to
+# prod's copy until Milestone 6 split dev's template-test-1 backend across
+# three namespaces (template-test-1-{rolling,bluegreen,canary}) -- this
+# points at template-test-1-rolling now, same reasoning as
+# examples-dev/httproute-path.yaml's own comment. Cross-namespace
+# backendRef, allowed by platform/rollouts/dev/referencegrant-rolling.yaml.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -17,5 +21,5 @@ spec:
   rules:
     - backendRefs:
         - name: template-test-1
-          namespace: template-test-1
+          namespace: template-test-1-rolling
           port: 8080

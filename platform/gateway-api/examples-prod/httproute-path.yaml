@@ -1,0 +1,23 @@
+# Path routing example (CLAUDE.md, Gateway API section). Per-environment,
+# not shared -- see examples-dev/httproute-path.yaml's comment for why.
+# prod's template-test-1 is unconverted (Milestone 6 kept it a single
+# plain Deployment/namespace, unlike dev's three-way split), so this stays
+# exactly what the old shared file was. Cross-namespace backendRef,
+# allowed by this directory's own referencegrant.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: template-test-1-path
+  namespace: gateway-api-examples
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /template-test-1
+      backendRefs:
+        - name: template-test-1
+          namespace: template-test-1
+          port: 8080

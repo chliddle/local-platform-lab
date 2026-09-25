@@ -4,6 +4,11 @@
 # a ReferenceGrant. This lives in the target namespace (template-test-1),
 # not the source namespace, by design: the namespace being referenced is
 # the one that has to opt in.
+#
+# prod only, not shared -- see examples-dev/httproute-path.yaml's comment.
+# dev's equivalent grant is platform/rollouts/dev/referencegrant-rolling.yaml
+# (Milestone 6), covering template-test-1-rolling instead of a single
+# template-test-1 namespace.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
