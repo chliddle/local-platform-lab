@@ -44,6 +44,14 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 echo "==> Trusting prod's root CA (you'll be prompted for admin approval)"
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${ca_dir}/prod-root-ca.crt"
 
+# Milestone 6 dropped MetalLB (see platform/gateway-api/examples/gateway.yaml's
+# comment) -- reaching the Gateway now needs an explicit :<nodePort>
+# suffix, since there's no LoadBalancer IP putting it on the standard 443
+# port any more. Read live, not hardcoded -- not stable across a cluster
+# recreate, same as everywhere else this project reads it.
+dev_port="$(KUBECONFIG="$dev_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+prod_port="$(KUBECONFIG="$prod_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+
 echo "==> Done. Verify with:"
-echo "  curl https://template-test-1.dev.platform.local/"
-echo "  curl https://template-test-1.prod.platform.local/"
+echo "  curl https://template-test-1.dev.platform.local:${dev_port}/"
+echo "  curl https://template-test-1.prod.platform.local:${prod_port}/"

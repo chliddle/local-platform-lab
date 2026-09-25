@@ -46,9 +46,17 @@ echo "==> [5/6] Setting up local DNS (*.dev.platform.local, *.prod.platform.loca
 echo "==> [6/6] Trusting both clusters' local CAs"
 "${repo_root}/scripts/trust-local-ca.sh"
 
-cat <<'EOF'
+# Milestone 6 dropped MetalLB -- reaching the Gateway now needs an
+# explicit :<nodePort> suffix (see platform/gateway-api/examples/
+# gateway.yaml's comment). Read live, not hardcoded.
+dev_kubeconfig="${repo_root}/terraform/environments/dev/kubeconfig-local-platform-dev"
+prod_kubeconfig="${repo_root}/terraform/environments/prod/kubeconfig-local-platform-prod"
+dev_port="$(KUBECONFIG="$dev_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+prod_port="$(KUBECONFIG="$prod_kubeconfig" kubectl -n gateway-api-examples get svc demo-gateway-istio -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}' 2>/dev/null || true)"
+
+cat <<EOF
 
 ==> Platform is up.
-  curl https://template-test-1.dev.platform.local/
-  curl https://template-test-1.prod.platform.local/
+  curl https://template-test-1.dev.platform.local:${dev_port}/
+  curl https://template-test-1.prod.platform.local:${prod_port}/
 EOF

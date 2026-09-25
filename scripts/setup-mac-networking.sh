@@ -41,19 +41,58 @@ if [ -n "$test_ip" ] && curl -sk -m 2 -o /dev/null "https://${test_ip}:6443" 2>/
   exit 0
 fi
 
-cat <<'EOF'
+# Two genuinely distinct failure modes confirmed live, not the same fix --
+# check which one this actually is instead of always printing the same
+# generic instructions (confirmed live those are useless, and misleading,
+# for the second case: telling someone to `sudo brew services start` a
+# service that's already correctly running as root, when the real problem
+# is a stuck WireGuard handshake, just wastes their time). `brew services
+# list`'s own status column turned out NOT to be a reliable signal here
+# (confirmed live: it reported "none" immediately after `brew services
+# start` itself reported "already started" as root) -- the log is: a
+# repeated "Handshake did not complete" line can only appear once the
+# process has already gotten past TUN-device creation (root privilege
+# confirmed), so its presence alone distinguishes the two cases.
+stderr_log="$(brew --prefix)/var/log/docker-mac-net-connect/std_error.log"
+stdout_log="$(brew --prefix)/var/log/docker-mac-net-connect/std_out.log"
+# tail, not the whole file: this log is never rotated/cleared, so old
+# errors from a previous, unrelated failure linger forever otherwise --
+# confirmed live checking only the last handful of lines is what actually
+# reflects current state.
+if tail -n 20 "$stdout_log" 2>/dev/null | grep -q "Handshake did not complete"; then
+  cat <<EOF
+==> Not reachable, but docker-mac-net-connect IS already running as root
+-- this is a STUCK WIREGUARD HANDSHAKE, not the permission problem (its
+own log, ${stdout_log}, shows repeated "Handshake did not complete...
+retrying"). Confirmed live: this happens when Docker Desktop and
+docker-mac-net-connect were started/restarted at different times during a
+long session -- each side generates its own WireGuard keypair at startup,
+so one side ends up holding the other's now-stale public key and they can
+never shake hands again.
+
+Fix: restart BOTH together, Docker Desktop first, then this service:
+
+  sudo brew services stop docker-mac-net-connect
+  # quit and reopen Docker Desktop (or: killall Docker && open -a Docker),
+  # wait for it to fully come back up, THEN:
+  sudo brew services start docker-mac-net-connect
+
+Verify once done (re-run this script, or manually):
+  curl -sk https://172.18.0.2:6443    # any live cluster's control-plane IP
+EOF
+else
+  cat <<EOF
 ==> Not reachable yet. docker-mac-net-connect needs to run as a root
 background service (it creates a TUN device, which needs root) -- run
 this yourself:
 
   sudo brew services start docker-mac-net-connect
 
-A PLAIN (non-sudo) `brew services start` will appear to succeed but
+A PLAIN (non-sudo) \`brew services start\` will appear to succeed but
 actually fails: it registers as a user-level LaunchAgent instead of a
 root LaunchDaemon, which can't create the TUN device it needs
 ("operation not permitted") -- confirmed live via
-/opt/homebrew/var/log/docker-mac-net-connect/std_error.log. If you've
-already hit that, clean it up first:
+${stderr_log}. If you've already hit that, clean it up first:
 
   brew services stop docker-mac-net-connect
   sudo brew services start docker-mac-net-connect
@@ -61,3 +100,5 @@ already hit that, clean it up first:
 Verify once done (re-run this script, or manually):
   curl -sk https://172.18.0.2:6443    # any live cluster's control-plane IP
 EOF
+fi
+exit 1
