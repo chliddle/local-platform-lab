@@ -53,6 +53,30 @@ spec:
       valuesObject:
         service:
           type: NodePort
+        # This chart's own default labels include
+        # "istio.io/dataplane-mode: none" (its own comment: "don't enroll
+        # gateways into the ambient dataplane"), which is also -- confirmed
+        # live, isolated by comparing two ReplicaSets side by side with
+        # istiod equally warmed up for both -- exactly what was silently
+        # blocking istiod's sidecar-injection webhook from ever firing for
+        # this pod at all: the container image stayed the literal string
+        # "auto" (the chart's own un-injected placeholder,
+        # ImagePullBackOff pulling "docker.io/library/auto") no matter how
+        # long the pod sat there, despite carrying
+        # sidecar.istio.io/inject: "true" and a registered "gateway"
+        # injection template (verified present in istiod's own
+        # istio-sidecar-injector ConfigMap). Overriding just this one
+        # label (Helm deep-merges the `labels` map, so the rest of the
+        # chart's defaults are untouched) to an empty string was enough to
+        # let injection proceed -- confirmed live the very next pod came
+        # up with the real registry.istio.io/release/proxyv2 image and a
+        # populated sidecar.istio.io/status annotation. The Gateway API-
+        # auto-provisioned demo-gateway proxy never hit this at all: it's
+        # constructed directly by istiod's own gateway-deployment
+        # controller with the resolved image baked in, not via this
+        # webhook-injection path.
+        labels:
+          "istio.io/dataplane-mode": ""
         # This chart's autoscaling.enabled defaults to true, creating an
         # HPA -- confirmed live it leaves the Application permanently
         # Degraded in Argo CD's eyes (HPA status.conditions:
