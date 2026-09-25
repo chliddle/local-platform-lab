@@ -1,0 +1,33 @@
+# Lets dev's self-hosted runner pods (ARC) read this cluster's own Argo CD
+# Applications directly, in-cluster -- the runner's own health/integration
+# checks query dev's Application sync/health status this way, no
+# extracted/portable credential needed (unlike prod, a genuinely separate
+# cluster -- see prod-ci-argocd-reader, and scripts/sync-runner-creds.sh
+# which copies prod's equivalent token into this same runner's namespace).
+# No namespace set on either object -- applied into whatever this
+# Application's destination.namespace is (gitops/dev/platform/
+# argocd-runner-rbac.yaml: argocd).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-application-reader
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-reads-dev-argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-application-reader
+subjects:
+  # ARC's own default ServiceAccount for this scale set's runner pods
+  # (confirmed via the EphemeralRunnerSet's pod spec) -- carries no RBAC
+  # until this binding.
+  - kind: ServiceAccount
+    name: platform-runners-gha-rs-no-permission
+    namespace: arc-runners

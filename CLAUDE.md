@@ -48,6 +48,34 @@ Create two local Kubernetes clusters using Kind:
 
 Terraform is preferred for cluster/bootstrap orchestration where practical.
 
+**Current status: Terraform's scope is deliberately minimal -- bootstrap
+the Kind cluster and Argo CD, then get out of the way (Milestone 6).**
+Each environment's `main.tf` is just `module.kind` +
+`helm_release.argocd` + `helm_release.argocd_bootstrap` (a small local
+chart, `platform/argocd/bootstrap-chart/`, containing only the Argo CD
+repo-creds Secret and the two root Applications that make Argo CD start
+reconciling everything else itself). No `kubernetes_*` typed resources
+remain in either environment -- namespaces, RBAC, and the platform's own
+tooling (ARC, monitoring, Gateway API, Istio, and everything
+onboarded apps need) are all Argo CD-managed. The one exception:
+credential material that genuinely can't be committed to Git for Argo CD
+to sync declaratively (GHCR pull secrets, the ARC runner PAT) is
+script-bridged post-bootstrap by `scripts/sync-bootstrap-secrets.sh`,
+called from `scripts/bootstrap.sh` -- the same pattern already used for
+the cross-cluster runner credential (`scripts/sync-runner-creds.sh`) and
+the monitoring stack's CA cert (`scripts/sync-monitoring-targets.sh`).
+This replaced an earlier design where Terraform directly created several
+namespaces and credential Secrets via typed `kubernetes_namespace_v1`/
+`kubernetes_secret_v1` resources, and applied the root Applications via a
+`kubectl apply` `terraform_data` local-exec (itself a workaround for two
+things that broke a from-scratch single-`terraform apply` bootstrap: a
+`kubernetes_manifest` resource validates against the Application CRD
+schema at Terraform *plan* time, before Argo CD's own chart has installed
+that CRD; community kubectl-apply providers eagerly stat the kubeconfig
+file at provider-configure time, before it exists on a truly fresh apply.
+`helm_release` hits neither problem, the same way `helm_release.argocd`
+itself already proves works on a from-scratch cluster).
+
 Provide a bootstrap command/script capable of recreating the entire environment.
 
 Example goal:
@@ -754,12 +782,17 @@ change, never write access to the platform repo for the app team.
 .
 ├── platform/
 │   ├── argocd/
-│   ├── argo-rollouts/
+│   │   └── bootstrap-chart/  # the entire GitOps footprint Terraform installs --
+│   │                          # repo-creds Secret + the two root Applications
+│   ├── rbac/                 # namespace-scoped Role/RoleBinding-only Applications
+│   │                          # (no credential material -- see Local Kubernetes
+│   │                          # Environments' Terraform-scope status note)
+│   ├── rollouts/
 │   ├── cert-manager/
 │   ├── gateway-api/
 │   ├── istio/
 │   ├── kyverno/
-│   └── observability/
+│   └── grafana-dashboards/
 │
 ├── gitops/
 │   ├── dev/
@@ -1014,9 +1047,12 @@ dev/prod entirely. **Dropped in Milestone 5** after repeatedly hitting real
 resource contention on the shared Docker Desktop VM -- see GitHub Actions
 Runners, above, for the full account and why a single-laptop lab doesn't
 have a better option here. ARC and the runner scale set now run on dev
-(Terraform: `terraform/environments/dev/main.tf`; GitOps:
-`gitops/dev/platform/{arc-controller,arc-runners}.yaml`) -- functionally
-the same components, same RBAC shape, just relocated. BuildKit did NOT
+(GitOps: `gitops/dev/platform/{arc-controller,arc-runners}.yaml` and
+`{argocd-runner-rbac,arc-runner-secrets-rbac}.yaml`; credential Secrets
+only: `scripts/sync-bootstrap-secrets.sh`, Terraform's involvement ends at
+bootstrapping Argo CD itself as of Milestone 6 -- see Repository Structure)
+-- functionally the same components, same RBAC shape, just relocated.
+BuildKit did NOT
 move with them -- it was removed entirely, separately, later in Milestone
 5 (see the BuildKit bullet above and GitHub Actions Runners' own note).
 Every other bullet above still describes the current, live behavior; only

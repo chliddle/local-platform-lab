@@ -63,3 +63,8 @@ spec:
       # for the etcd request-size failure this sidesteps).
       - ServerSideApply=true
       - Replace=true
+      # Milestone 6: arc-systems used to be pre-created by Terraform
+      # (kubernetes_namespace_v1.arc_systems) -- now that Terraform only
+      # bootstraps Argo CD, this Application has to create its own
+      # namespace.
+      - CreateNamespace=true

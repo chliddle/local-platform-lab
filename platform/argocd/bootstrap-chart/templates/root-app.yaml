@@ -1,3 +1,7 @@
+# Self-service onboarded apps (gitops/{{ .Values.environment }}/apps) --
+# unchanged in shape since Milestone 1, now templated instead of two
+# near-duplicate static files (root-app.yaml/root-app-prod.yaml, which
+# differed only by this path).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -8,9 +12,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/chliddle/local-platform-lab.git
+    repoURL: {{ .Values.githubRepoUrl | quote }}
     targetRevision: main
-    path: gitops/prod/apps
+    path: gitops/{{ .Values.environment }}/apps
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

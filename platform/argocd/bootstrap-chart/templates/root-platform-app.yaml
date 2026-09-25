@@ -1,0 +1,38 @@
+# Multiple sources, combined into one sync: platform/gitops-platform-apps
+# holds the Application manifests that are byte-identical across every
+# cluster (dev and prod should run the same platform infra); this
+# environment's own gitops/{{ .Values.environment }}/platform holds only
+# what genuinely can't be shared.
+#
+# prod's platform source pins targetRevision: prod, not main -- prod's
+# promotion gate. main is where dev-track changes land (root.yaml above,
+# and dev's own copy of this Application, both still on main); a change
+# only reaches the prod branch once .github/workflows/promote-platform.yml
+# has verified every Application in dev's own argocd namespace (not just
+# the platform ones) is Synced+Healthy, and fast-forwards prod to that
+# commit automatically. dev tracks main directly on both sources.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: {{ .Values.githubRepoUrl | quote }}
+      targetRevision: {{ if eq .Values.environment "prod" }}prod{{ else }}main{{ end }}
+      path: platform/gitops-platform-apps
+    - repoURL: {{ .Values.githubRepoUrl | quote }}
+      targetRevision: {{ if eq .Values.environment "prod" }}prod{{ else }}main{{ end }}
+      path: gitops/{{ .Values.environment }}/platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

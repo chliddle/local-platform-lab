@@ -1,0 +1,33 @@
+# Lets runner pods read exactly these named credential Secrets -- named by
+# resource, not a blanket "secrets" grant, so a compromised job still can't
+# read anything else in this namespace (e.g. the ARC runner's own PAT,
+# platform-runner-github-credential). Both named Secrets are placed here by
+# scripts, never GitOps-managed themselves (real credential material):
+# prod-argocd-reader by scripts/sync-runner-creds.sh, platform-repo-push-
+# credential by scripts/sync-bootstrap-secrets.sh. No namespace set on
+# either object -- applied into whatever this Application's
+# destination.namespace is (gitops/dev/platform/arc-runner-secrets-
+# rbac.yaml: arc-runners, CreateNamespace=true since this can sync before
+# arc-runners.yaml's own release creates it).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: runner-reads-argocd-creds
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["prod-argocd-reader", "platform-repo-push-credential"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-reads-argocd-creds
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: runner-reads-argocd-creds
+subjects:
+  - kind: ServiceAccount
+    name: platform-runners-gha-rs-no-permission
+    namespace: arc-runners

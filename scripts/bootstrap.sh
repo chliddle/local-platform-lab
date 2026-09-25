@@ -3,7 +3,8 @@
 # Argo CD + a root Application (gitops/<env>/apps -- onboarded self-service
 # apps) + a root-platform Application (platform/gitops-platform-apps,
 # shared across both clusters, plus gitops/<env>/platform for what
-# genuinely can't be shared -- see root-platform-dev.yaml's comment). dev
+# genuinely can't be shared -- see platform/argocd/bootstrap-chart/
+# templates/root-platform-app.yaml's comment). dev
 # additionally hosts the platform's own tooling (ARC, the runner scale set)
 # and the observability stack (metrics only -- see CLAUDE.md's GitHub
 # Actions Runners and Observability sections for why there's no separate
@@ -102,6 +103,15 @@ cluster_name="$(terraform -chdir="${env_dir}" output -raw cluster_name)"
 argocd_namespace="$(terraform -chdir="${env_dir}" output -raw argocd_namespace)"
 echo "==> Waiting for Argo CD server to be ready"
 KUBECONFIG="${kubeconfig_path}" kubectl -n "${argocd_namespace}" rollout status deployment/argocd-server --timeout=180s
+
+# Milestone 6: Terraform's scope shrank to bootstrapping Argo CD only --
+# everything else, namespaces included, is Argo CD-managed, except
+# credential material that genuinely can't be committed to Git (GHCR pull
+# secrets, the ARC runner PAT). Has to happen before the health-wait
+# below: the Applications that need these Secrets can never reach Healthy
+# without them existing first.
+echo "==> Syncing bootstrap credential Secrets (GHCR pull secrets, ARC runner PAT)"
+"${repo_root}/scripts/sync-bootstrap-secrets.sh" "$env_name"
 
 # kube-prometheus-stack and ARC (both dev only) ship CRDs too large for
 # Argo CD to sync safely -- see scripts/pre-apply-large-crds.sh for the two
@@ -256,10 +266,18 @@ Argo CD UI (admin password below, then browse https://localhost:8080):
   kubectl -n ${argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 EOF
 
-cat <<EOF
+if [ "$env_name" = "dev" ]; then
+  cat <<EOF
+Check the three template-test-1 deployment-strategy variants synced
+(Milestone 6 -- rolling/blue-green/canary comparison sandbox):
+  kubectl -n ${argocd_namespace} get applications template-test-1-rolling template-test-1-bluegreen template-test-1-canary
+EOF
+else
+  cat <<EOF
 Check the template-test-1 app synced:
   kubectl -n ${argocd_namespace} get application template-test-1 -o jsonpath='{.status.sync.status} {.status.health.status}{"\n"}'
 EOF
+fi
 
 if [ "$env_name" = "dev" ]; then
   cat <<EOF

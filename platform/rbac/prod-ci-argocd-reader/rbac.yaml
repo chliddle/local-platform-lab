@@ -1,0 +1,54 @@
+# prod is a genuinely separate cluster from where the self-hosted CI
+# runner lives (dev) -- checking prod's Argo CD Application sync/health
+# status for real cross-repo integration testing (does a platform change
+# break an already-onboarded app, and vice versa) needs a portable,
+# extracted credential. scripts/sync-runner-creds.sh copies this
+# ServiceAccount's token into dev's arc-runners namespace. Read-only on
+# exactly one resource type, nothing else. No exec, no secrets, no write
+# verbs.
+#
+# No namespace set on any object -- applied into whatever this
+# Application's destination.namespace is (gitops/prod/platform/
+# ci-argocd-reader.yaml: argocd).
+#
+# The Secret below needs no injected credential material at all: it's a
+# kubernetes.io/service-account-token-type Secret with only the
+# `kubernetes.io/service-account.name` annotation set -- Kubernetes'
+# controller populates the actual token data itself once both objects
+# exist, the same as it would for a kubectl- or Terraform-created one.
+# (Kubernetes 1.24+ no longer auto-creates this Secret for a
+# ServiceAccount on its own -- it has to be created explicitly, which is
+# all this does.)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-argocd-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-argocd-reader
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-argocd-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-argocd-reader
+subjects:
+  - kind: ServiceAccount
+    name: ci-argocd-reader
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-argocd-reader-token
+  annotations:
+    kubernetes.io/service-account.name: ci-argocd-reader
+type: kubernetes.io/service-account-token

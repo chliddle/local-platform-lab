@@ -1,0 +1,10 @@
+# Every value here is overridden by Terraform's helm_release.argocd_bootstrap
+# (terraform/environments/{dev,prod}/main.tf) -- these defaults exist only
+# so `helm lint`/`helm template` work standalone (e.g. CI's rendering
+# check) without needing real values.
+environment: dev
+
+githubUsername: ""
+githubToken: ""
+githubOrgUrl: "https://github.com/chliddle/"
+githubRepoUrl: "https://github.com/chliddle/local-platform-lab.git"

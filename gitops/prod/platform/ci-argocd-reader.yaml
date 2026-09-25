@@ -1,0 +1,26 @@
+# Milestone 6: moved out of Terraform (was kubernetes_service_account_v1.
+# ci_argocd_reader + kubernetes_role_v1/kubernetes_role_binding_v1.
+# ci_argocd_reader + kubernetes_secret_v1.ci_argocd_reader_token) -- no
+# credential material is actually injected (see platform/rbac/prod-ci-
+# argocd-reader/rbac.yaml's comment: the token Secret self-populates), so
+# this is a plain GitOps-managed Application.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ci-argocd-reader
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chliddle/local-platform-lab.git
+    targetRevision: prod
+    path: platform/rbac/prod-ci-argocd-reader
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

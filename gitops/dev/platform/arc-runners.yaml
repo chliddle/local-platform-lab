@@ -7,8 +7,11 @@
 # docker/build-push-action, no local dependency), so the rootless BuildKit
 # deployment this scale set originally talked to over the network was
 # dropped entirely -- it had no other consumer. `githubConfigSecret`
-# references the same platform-runner-github-credential Secret Terraform
-# still creates directly (never committed, never GitOps-managed).
+# references the platform-runner-github-credential Secret
+# scripts/sync-bootstrap-secrets.sh places directly (never committed,
+# never GitOps-managed -- real credential material, Terraform's old job,
+# moved to a script alongside the rest of Terraform's scope shrinking to
+# "bootstrap Argo CD only" in Milestone 6).
 #
 # sync-wave 1: the AutoscalingRunnerSet CRD this chart's release depends on
 # is only installed once arc-controller.yaml (wave 0, the default) has
@@ -57,3 +60,11 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      # Milestone 6: arc-runners used to be pre-created by Terraform
+      # (kubernetes_namespace_v1.arc_runners) -- now that Terraform only
+      # bootstraps Argo CD, this Application has to create its own
+      # namespace. scripts/sync-bootstrap-secrets.sh also idempotently
+      # creates it (belt-and-suspenders, since it needs to place a Secret
+      # here and can't depend on winning this race).
+      - CreateNamespace=true

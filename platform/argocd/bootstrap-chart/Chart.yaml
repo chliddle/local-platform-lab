@@ -1,0 +1,17 @@
+apiVersion: v2
+name: argocd-bootstrap
+description: >-
+  Terraform's entire remaining GitOps footprint: the repo-creds Secret Argo
+  CD needs to read this private repo, plus the two root Applications
+  (root, root-platform) that make it start reconciling everything else
+  itself. Everything past this -- namespaces, RBAC, workload-credential
+  Secrets included -- is Argo CD-managed or script-bridged, never
+  Terraform. Installed via helm_release (not a kubectl-apply local-exec)
+  specifically because Helm doesn't validate CRD schemas at Terraform
+  plan time and doesn't eagerly stat the kubeconfig at provider-configure
+  time -- both of which broke a single-`terraform apply` bootstrap on a
+  truly fresh cluster with the alternatives tried first (see
+  terraform/environments/{dev,prod}/main.tf's helm_release.argocd_bootstrap
+  comment for the full story).
+type: application
+version: 0.1.0

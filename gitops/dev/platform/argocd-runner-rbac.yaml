@@ -1,7 +1,12 @@
+# Milestone 6: moved out of Terraform (was kubernetes_role_v1.
+# argocd_application_reader + kubernetes_role_binding_v1.
+# runner_reads_dev_argocd) -- no secret material, so this is a plain
+# GitOps-managed Application like everything else, not a Terraform
+# resource or a script-bridged credential.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: root
+  name: argocd-runner-rbac
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -10,7 +15,7 @@ spec:
   source:
     repoURL: https://github.com/chliddle/local-platform-lab.git
     targetRevision: main
-    path: gitops/dev/apps
+    path: platform/rbac/dev-argocd-runner
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -18,5 +23,3 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
