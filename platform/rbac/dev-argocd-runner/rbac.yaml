@@ -31,3 +31,36 @@ subjects:
   - kind: ServiceAccount
     name: platform-runners-gha-rs-no-permission
     namespace: arc-runners
+---
+# check-app-dev-health.yml's SLI gate needs to read HTTPRoute status
+# (Accepted/ResolvedRefs) to catch a routing-level break (e.g. a missing
+# or misconfigured HTTPRoute) that Argo CD's own Application health check
+# wouldn't -- Application health only reflects the workload's own
+# resources (Deployment/Rollout/Pod), not whether traffic can actually
+# reach it. Explicit metadata.namespace here (not this Application's
+# destination.namespace: argocd) since HTTPRoutes live in
+# gateway-api-examples -- Argo CD applies a resource to its own declared
+# namespace when it sets one, overriding the Application default.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: httproute-reader
+  namespace: gateway-api-examples
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-reads-httproutes
+  namespace: gateway-api-examples
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: httproute-reader
+subjects:
+  - kind: ServiceAccount
+    name: platform-runners-gha-rs-no-permission
+    namespace: arc-runners

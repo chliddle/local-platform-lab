@@ -1,0 +1,115 @@
+name: check app dev health
+
+# App-level counterpart to promote-platform.yml's own dev-health gate: an
+# app repo's ci.yml (update-dev-digest) fires this after it writes a new
+# digest to deploy/overlays/dev-*, so semantic-release (that repo's own
+# release.yml) only tags a version once dev is *actually* confirmed
+# Synced+Healthy on the real cluster -- not just once an isolated,
+# throwaway-Kind-cluster smoke test passes (all ci.yml's own jobs prove).
+#
+# Two layers, both must pass: Argo CD Application health (workload-level:
+# are the right resources running), then real SLIs -- synthetic probe
+# success, HTTP error rate, HTTPRoute routing status -- generated and
+# measured against real traffic (see wait-for-sli-health.sh). Argo CD
+# health alone can't catch a deploy that passes every liveness/readiness
+# check but serves real requests badly: Milestone 6's own FAULT_ERROR_RATE
+# fault injection exists specifically to demonstrate that gap.
+#
+# repository_dispatch, not push/workflow_dispatch: this is a genuinely new
+# trigger class for this repo's self-hosted runner (see CLAUDE.md's
+# binding constraint under GitHub Actions Runners), but it satisfies the
+# same underlying requirement that constraint protects -- no path for an
+# untrusted fork PR to reach this runner. Firing a repository_dispatch
+# requires a valid token with write access to this repo's contents/
+# dispatches; nothing anonymous or fork-originated can trigger it.
+on:
+  repository_dispatch:
+    types: [check-dev-health]
+
+# Multiple onboarded apps could dispatch concurrently; each gets its own
+# concurrency group (keyed by callback_repo) so one app's check never
+# queues behind another's, but a second push from the *same* app while its
+# first check is still running waits instead of racing it.
+concurrency:
+  group: check-app-dev-health-${{ github.event.client_payload.callback_repo }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: platform-runners
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install kubectl
+        run: |
+          arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+          curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/v1.29.2/bin/linux/${arch}/kubectl"
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+      # Same in-cluster ServiceAccount token + RBAC promote-platform.yml
+      # already uses (get/list/watch Applications in argocd only -- see
+      # terraform/environments/dev/main.tf's runner_reads_dev_argocd
+      # binding). client_payload.apps is a space-separated list of exactly
+      # the Application names the caller wants checked -- deliberately not
+      # "every Application", see wait-for-argocd-health.sh's own comment.
+      - name: Wait for the requested dev Applications to be Synced + Healthy
+        id: wait
+        continue-on-error: true
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          APPS: ${{ github.event.client_payload.apps }}
+        run: scripts/wait-for-argocd-health.sh argocd $APPS
+
+      # Only bother generating traffic and measuring SLIs once the
+      # workload itself is actually Synced+Healthy -- no point probing a
+      # deployment that isn't even up yet. service_name is the shared
+      # Kubernetes Service name across every namespace in $APPS (e.g.
+      # "template-test-1", reused identically by all three
+      # deployment-strategy variants) -- see wait-for-sli-health.sh for
+      # what's checked and why each check is skip-if-unconfigured rather
+      # than a hard requirement.
+      - name: Generate traffic and check real SLIs (blackbox, HTTP error rate, HTTPRoute)
+        id: sli
+        if: steps.wait.outcome == 'success'
+        continue-on-error: true
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          SERVICE_NAME: ${{ github.event.client_payload.service_name }}
+          APPS: ${{ github.event.client_payload.apps }}
+        run: scripts/wait-for-sli-health.sh "$SERVICE_NAME" $APPS
+
+      # platform-repo-push-credential is the same classic PAT
+      # promote-platform.yml already reads from this pod's own namespace to
+      # push to this repo -- reused here to call a *different* repo's
+      # dispatches endpoint instead, same credential, same blast radius
+      # already documented in CLAUDE.md's Milestone 4 Security
+      # implications, not a new exposure.
+      - name: Report result back to the requesting repo
+        if: always()
+        env:
+          SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
+          SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          CALLBACK_REPO: ${{ github.event.client_payload.callback_repo }}
+          SHA: ${{ github.event.client_payload.sha }}
+          STATUS: ${{ (steps.wait.outcome == 'success' && steps.sli.outcome == 'success') && 'success' || 'failure' }}
+        run: |
+          push_token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret platform-repo-push-credential -o jsonpath='{.data.token}' | base64 -d)
+          echo "::add-mask::${push_token}"
+
+          curl -fsSL -X POST \
+            -H "Authorization: token ${push_token}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${CALLBACK_REPO}/dispatches" \
+            -d "{\"event_type\":\"dev-health-result\",\"client_payload\":{\"status\":\"${STATUS}\",\"sha\":\"${SHA}\"}}"
+
+      - name: Fail this run if any health check failed
+        if: steps.wait.outcome != 'success' || steps.sli.outcome != 'success'
+        run: exit 1

@@ -49,38 +49,21 @@ jobs:
       # Scoped by Terraform to get/list/watch Applications in the argocd
       # namespace only (see terraform/environments/dev/main.tf's
       # runner_reads_dev_argocd binding).
+      #
+      # Discovers the app list dynamically (not a fixed set) so an onboarded
+      # app silently breaking still blocks prod -- the same reasoning as
+      # before this was extracted to scripts/wait-for-argocd-health.sh,
+      # which check-app-dev-health.yml also uses, with an explicit fixed
+      # list instead (see that script's own comment for why the two
+      # workflows make different choices here).
       - name: Wait for every dev Application to be Synced + Healthy
         env:
           SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
           SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
         run: |
-          deadline=$((SECONDS + 300))
-          while true; do
-            app_names=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-              -n argocd get applications -o jsonpath='{.items[*].metadata.name}')
-            not_ready=""
-            for name in $app_names; do
-              sync_status=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-                -n argocd get application "$name" -o jsonpath='{.status.sync.status}')
-              health_status=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-                -n argocd get application "$name" -o jsonpath='{.status.health.status}')
-              if [ "$sync_status" != "Synced" ] || [ "$health_status" != "Healthy" ]; then
-                not_ready="${not_ready}${name}: sync=${sync_status} health=${health_status}"$'\n'
-              fi
-            done
-            if [ -z "$not_ready" ]; then
-              echo "All dev Applications Synced+Healthy."
-              break
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for dev to become healthy. Not Synced+Healthy:"
-              echo "$not_ready"
-              exit 1
-            fi
-            echo "Not yet healthy, retrying in 15s:"
-            echo "$not_ready"
-            sleep 15
-          done
+          app_names=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n argocd get applications -o jsonpath='{.items[*].metadata.name}')
+          scripts/wait-for-argocd-health.sh argocd $app_names
 
       # platform-repo-push-credential is the same classic PAT dev/prod's
       # Argo CD/GHCR secrets already use (var.github_token) -- reused
