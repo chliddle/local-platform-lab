@@ -20,6 +20,18 @@ spec:
     - name: canary-hash
   metrics:
     - name: success-rate
+      # Confirmed live this is necessary, not just a safety margin: the
+      # very first analysis run(s) fired before the canary pod had two
+      # real scrapes yet, so rate()'s 1m window had 0-1 samples and
+      # returned genuinely empty (not zero) -- Argo Rollouts treats an
+      # empty PromQL result as an ERROR ("no data returned from the
+      # metric provider"), not a measurement of 0, and enough consecutive
+      # errors aborted the rollout before the fault-rate query ever got a
+      # real answer. initialDelay of 2x the OTel Collector's own 30s
+      # scrape interval (gitops/dev/platform/otel-collector.yaml)
+      # guarantees at least two real samples exist before the first
+      # measurement is even attempted.
+      initialDelay: 60s
       interval: 30s
       count: 3
       successCondition: result[0] >= 0.95
