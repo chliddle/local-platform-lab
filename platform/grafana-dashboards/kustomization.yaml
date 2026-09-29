@@ -27,3 +27,10 @@ configMapGenerator:
       labels:
         grafana_dashboard: "1"
       disableNameSuffixHash: true
+  - name: dashboard-progressive-delivery
+    files:
+      - progressive-delivery.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+      disableNameSuffixHash: true

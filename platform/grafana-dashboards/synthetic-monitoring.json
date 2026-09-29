@@ -29,8 +29,8 @@
       },
       "targets": [
         {
-          "expr": "probe_success{job=\"blackbox-template-test-1\"}",
-          "legendFormat": "{{cluster}}"
+          "expr": "probe_success{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}}"
         }
       ]
     },
@@ -41,8 +41,8 @@
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
-          "expr": "probe_http_status_code{job=\"blackbox-template-test-1\"}",
-          "legendFormat": "{{cluster}}"
+          "expr": "probe_http_status_code{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}}"
         }
       ]
     },
@@ -66,8 +66,8 @@
       },
       "targets": [
         {
-          "expr": "probe_ssl_earliest_cert_expiry{job=\"blackbox-template-test-1\"} - time()",
-          "legendFormat": "{{cluster}}"
+          "expr": "probe_ssl_earliest_cert_expiry{job=~\"blackbox-template-test-1.*\"} - time()",
+          "legendFormat": "{{variant}}"
         }
       ]
     },
@@ -79,12 +79,12 @@
       "fieldConfig": { "defaults": { "unit": "s" } },
       "targets": [
         {
-          "expr": "probe_duration_seconds{job=\"blackbox-template-test-1\"}",
-          "legendFormat": "{{cluster}} total"
+          "expr": "probe_duration_seconds{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}} total"
         },
         {
-          "expr": "probe_http_duration_seconds{job=\"blackbox-template-test-1\"}",
-          "legendFormat": "{{cluster}} - {{phase}}"
+          "expr": "probe_http_duration_seconds{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}} - {{phase}}"
         }
       ]
     },
@@ -92,13 +92,13 @@
       "id": 5,
       "type": "timeseries",
       "title": "Probe success over time",
-      "description": "1 = the last probe against https://template-test-1.dev.platform.local succeeded (HTTP success, expected TLS chain validated, per CLAUDE.md's Synthetic Monitoring section); 0 = it failed.",
+      "description": "1 = the last probe against that variant succeeded (rolling/bluegreen via the shared Gateway, HTTPS, expected TLS chain validated; canary via its own dedicated HTTP-only gateway -- see gitops/dev/platform/istio-ingressgateway-rollouts.yaml), per CLAUDE.md's Synthetic Monitoring section; 0 = it failed.",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "fieldConfig": { "defaults": { "min": 0, "max": 1 } },
       "targets": [
         {
-          "expr": "probe_success{job=\"blackbox-template-test-1\"}",
-          "legendFormat": "{{cluster}}"
+          "expr": "probe_success{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}}"
         }
       ]
     }

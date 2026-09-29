@@ -1,0 +1,135 @@
+{
+  "title": "Progressive Delivery -- deployment strategy comparison",
+  "uid": "progressive-delivery",
+  "editable": true,
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-15m", "to": "now" },
+  "refresh": "10s",
+  "tags": ["template-test-1", "rollouts", "milestone-6"],
+  "description": "Milestone 6: template-test-1 runs three deployment strategies in parallel on dev, each its own namespace (template-test-1-{rolling,bluegreen,canary}) -- every panel here is split by namespace so the three are directly comparable side by side. Drive a live comparison with scripts/simulate-bad-rollout.sh.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate by variant",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (namespace) (rate(http_requests_total{namespace=~\"template-test-1-.*\", path=\"/\"}[1m]))",
+          "legendFormat": "{{namespace}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Success rate (2xx) by variant",
+      "description": "The core comparison: run scripts/simulate-bad-rollout.sh to push a synthetic fault to all three at once and watch these lines diverge -- rolling drops and stays down (no protection), canary drops then recovers on its own (automated rollback), blue-green's active line should never move at all (bad build stays parked in preview).",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "expr": "sum by (namespace) (rate(http_requests_total{namespace=~\"template-test-1-.*\", path=\"/\", status=~\"2..\"}[1m])) / sum by (namespace) (rate(http_requests_total{namespace=~\"template-test-1-.*\", path=\"/\"}[1m]))",
+          "legendFormat": "{{namespace}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate (5xx) by variant",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (namespace) (rate(http_requests_total{namespace=~\"template-test-1-.*\", path=\"/\", status=~\"5..\"}[1m]))",
+          "legendFormat": "{{namespace}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "p95 latency by variant",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (namespace, le) (rate(http_request_duration_seconds_bucket{namespace=~\"template-test-1-.*\"}[5m])))",
+          "legendFormat": "{{namespace}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Canary traffic split (measured) -- stable vs. canary pod",
+      "description": "Only meaningful in template-test-1-canary while a rollout is in progress: real, observed request share per ReplicaSet (rollouts-pod-template-hash), not just the configured setWeight -- confirms Istio is actually routing the split, not merely that the Rollout object says it should be.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "expr": "sum by (rollouts_pod_template_hash) (rate(http_requests_total{namespace=\"template-test-1-canary\", path=\"/\"}[1m])) / ignoring(rollouts_pod_template_hash) group_left sum(rate(http_requests_total{namespace=\"template-test-1-canary\", path=\"/\"}[1m]))",
+          "legendFormat": "{{rollouts_pod_template_hash}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Rollout status by variant",
+      "description": "Current phase per Rollout (rolling has no Rollout object -- it's a plain Deployment, not shown here). Progressing/Paused = mid-rollout; Completed = steady state; Degraded/Error/Abort = something failed and the controller reacted.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 14 },
+      "targets": [
+        {
+          "expr": "rollout_phase{exported_namespace=~\"template-test-1-.*\"} == 1",
+          "legendFormat": "{{exported_namespace}}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": { "exported_namespace": true, "strategy": true, "phase": true },
+            "renameByName": { "exported_namespace": "variant" }
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Updated / desired replicas by variant",
+      "description": "Pod-health proxy for the two Rollout-managed variants: Updated < Desired means the new ReplicaSet hasn't finished rolling out yet.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
+      "targets": [
+        {
+          "expr": "rollout_info_replicas_updated{exported_namespace=~\"template-test-1-.*\"}",
+          "legendFormat": "{{exported_namespace}} updated"
+        },
+        {
+          "expr": "rollout_info_replicas_desired{exported_namespace=~\"template-test-1-.*\"}",
+          "legendFormat": "{{exported_namespace}} desired"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Synthetic probe success by variant",
+      "description": "Blackbox's independent, outside-in confirmation of the same story -- doesn't rely on the app's own metrics pipeline at all.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "expr": "probe_success{job=~\"blackbox-template-test-1.*\"}",
+          "legendFormat": "{{variant}}"
+        }
+      ]
+    }
+  ]
+}
