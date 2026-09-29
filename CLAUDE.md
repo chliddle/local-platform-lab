@@ -769,6 +769,41 @@ Use:
 
 Ensure simultaneous releases cannot unintentionally overwrite each other.
 
+**Current status: the platform repo and the app repos promote to prod by
+two different mechanisms, deliberately -- they're promoting two different
+kinds of artifact.** App repos (`template-test-1`) promote by image tag:
+one branch (`main`), separate `deploy/overlays/{dev,prod}` directories,
+and the prod overlay only ever changes via a gated bot commit
+(`promote-prod.yml`, itself gated on real dev health via
+`check-app-dev-health.yml`) -- see Release Process, above.
+
+The platform repo has no image to re-tag -- the GitOps YAML itself is the
+artifact -- so it promotes by **triggered sync** instead of a promotable
+field. It originally used a second `prod` branch, fast-forwarded by
+`.github/workflows/promote-platform.yml` once dev's own Applications were
+confirmed Synced+Healthy; that branch was removed (single source of
+truth, no branch-drift vector, matching the app repos' own philosophy --
+confirmed live before the redesign that `gitops/dev/platform/*.yaml` and
+`gitops/prod/platform/*.yaml` were already near-identical, differing only
+in which already-separate `-dev`/`-prod` config directory they pointed
+at, so the branch was never differentiating *content*, only gating *when*
+it applied). Every prod platform Application now tracks `main` directly
+but carries no `syncPolicy.automated` (see `platform/argocd/
+bootstrap-chart/templates/root-platform-app.yaml`'s own comment) --
+Argo CD reflects `OutOfSync` instead of silently self-healing, and only
+applies a change once `promote-platform.yml`'s same, unchanged health
+check passes and it patches each Application's `.operation` directly
+(`scripts/sync-prod-applications.sh`) via the same extracted
+`prod-argocd-reader` credential `ci-integration.yml` already uses for
+read-only health checks, now also granted `patch` on a fixed, named set
+of Applications (`platform/rbac/prod-ci-argocd-reader/rbac.yaml`).
+
+GitHub protected environments / required reviewers were not adopted --
+this repo's only collaborator is its owner (Milestone 3), so there's no
+second reviewer for a required-reviewers gate to mean anything; the real
+gate is dev's own live health, checked automatically, not a human
+approval step.
+
 ---
 
 # Rollback

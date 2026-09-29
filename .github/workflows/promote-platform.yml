@@ -1,16 +1,17 @@
 name: promote platform infra to prod
 
-# Milestone 5, Phase 2: dev's platform infra (and the app-of-apps roots
-# generally) track `main` directly for fast feedback; prod's root-platform
-# instead tracks the `prod` branch (see
-# platform/argocd/root-platform-prod.yaml), which only ever advances here
-# -- never by a direct push. This job is prod's promotion gate: on a push
-# to main that touches platform infra, it waits for every Application in
-# dev's own argocd namespace to be Synced+Healthy (not just the platform
-# ones -- the real question is "did this infra change break dev", and an
-# onboarded app silently breaking is exactly the kind of thing a
-# platform-components-only health check would miss), then fast-forwards
-# prod to that commit automatically.
+# Both dev's and prod's platform infra now track `main` directly -- one
+# branch, no drift vector (see platform/argocd/bootstrap-chart/templates/
+# root-platform-app.yaml's comment for why this moved off a separate prod
+# branch). prod's Applications have no syncPolicy.automated, so this job
+# IS prod's promotion gate: on a push to main that touches platform
+# infra, it waits for every Application in dev's own argocd namespace to
+# be Synced+Healthy (not just the platform ones -- the real question is
+# "did this infra change break dev", and an onboarded app silently
+# breaking is exactly the kind of thing a platform-components-only health
+# check would miss), then triggers a sync on prod's own platform
+# Applications (scripts/sync-prod-applications.sh) -- applying content
+# that's already on main, not writing new content anywhere.
 #
 # No pull_request trigger, deliberately -- same reasoning as every other
 # workflow in this repo (see ci-manifests.yml): this repo's only
@@ -65,23 +66,27 @@ jobs:
             -n argocd get applications -o jsonpath='{.items[*].metadata.name}')
           scripts/wait-for-argocd-health.sh argocd $app_names
 
-      # platform-repo-push-credential is the same classic PAT dev/prod's
-      # Argo CD/GHCR secrets already use (var.github_token) -- reused
-      # rather than a fresh credential, since it's already the
-      # widest-blast-radius credential in this platform (Milestone 4's
-      # Security implications) and adding another one wouldn't reduce
-      # actual attack surface. Lives as a Secret in this pod's own
-      # namespace (terraform/environments/dev/main.tf), read via its own
-      # in-cluster ServiceAccount token. Masked immediately: unlike a
-      # GitHub Actions `secrets.*` value, a token read from an in-cluster
-      # Secret is NOT automatically redacted from logs.
-      - name: Fast-forward prod to this commit
+      # prod-argocd-reader is the same extracted cross-cluster credential
+      # ci-integration.yml already uses to check prod's health remotely
+      # (scripts/sync-runner-creds.sh) -- now also granted `patch` on a
+      # fixed, named set of prod Applications (platform/rbac/
+      # prod-ci-argocd-reader/rbac.yaml), used here to actually trigger
+      # their sync. Masked immediately: unlike a GitHub Actions
+      # `secrets.*` value, a token read from an in-cluster Secret is NOT
+      # automatically redacted from logs.
+      - name: Sync prod's platform Applications
         env:
           SA_TOKEN_PATH: /var/run/secrets/kubernetes.io/serviceaccount/token
           SA_CA_PATH: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
         run: |
-          push_token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
-            -n arc-runners get secret platform-repo-push-credential -o jsonpath='{.data.token}' | base64 -d)
-          echo "::add-mask::${push_token}"
+          prod_server=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.server}' | base64 -d)
+          prod_token=$(kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.token}' | base64 -d)
+          echo "::add-mask::${prod_token}"
+          prod_ca_file=$(mktemp)
+          kubectl --server=https://kubernetes.default.svc --token="$(cat "$SA_TOKEN_PATH")" --certificate-authority="$SA_CA_PATH" \
+            -n arc-runners get secret prod-argocd-reader -o jsonpath='{.data.ca\.crt}' | base64 -d >"$prod_ca_file"
 
-          git push "https://x-access-token:${push_token}@github.com/chliddle/local-platform-lab.git" "HEAD:refs/heads/prod"
+          scripts/sync-prod-applications.sh "$prod_server" "$prod_token" "$prod_ca_file" \
+            root-platform cert-manager-ca ci-argocd-reader gateway-hostname-route

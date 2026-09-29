@@ -1,4 +1,11 @@
 # See gitops/dev/platform/cert-manager-ca.yaml for the sync-wave rationale.
+# targetRevision: main, no syncPolicy.automated -- see
+# platform/argocd/bootstrap-chart/templates/root-platform-app.yaml's
+# comment for the single-branch/triggered-sync promotion model this and
+# every other prod platform Application now uses instead of a separate
+# prod branch. Synced only when .github/workflows/promote-platform.yml
+# patches this Application's .operation after dev's own health check
+# passes.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -12,12 +19,8 @@ spec:
   project: default
   source:
     repoURL: https://github.com/chliddle/local-platform-lab.git
-    targetRevision: prod
+    targetRevision: main
     path: platform/cert-manager/config-prod
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true

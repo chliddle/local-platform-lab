@@ -4,6 +4,12 @@
 # credential material is actually injected (see platform/rbac/prod-ci-
 # argocd-reader/rbac.yaml's comment: the token Secret self-populates), so
 # this is a plain GitOps-managed Application.
+#
+# targetRevision: main, no syncPolicy.automated -- see
+# platform/argocd/bootstrap-chart/templates/root-platform-app.yaml's
+# comment for the single-branch/triggered-sync promotion model this and
+# every other prod platform Application now uses instead of a separate
+# prod branch.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -15,12 +21,8 @@ spec:
   project: default
   source:
     repoURL: https://github.com/chliddle/local-platform-lab.git
-    targetRevision: prod
+    targetRevision: main
     path: platform/rbac/prod-ci-argocd-reader
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true

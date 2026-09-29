@@ -3,9 +3,22 @@
 # status for real cross-repo integration testing (does a platform change
 # break an already-onboarded app, and vice versa) needs a portable,
 # extracted credential. scripts/sync-runner-creds.sh copies this
-# ServiceAccount's token into dev's arc-runners namespace. Read-only on
-# exactly one resource type, nothing else. No exec, no secrets, no write
-# verbs.
+# ServiceAccount's token into dev's arc-runners namespace.
+#
+# Also used by .github/workflows/promote-platform.yml to trigger prod's
+# promotion sync (kubectl patch application ... operation.sync), since
+# the platform repo moved off a separate prod branch to a single-branch,
+# triggered-sync model (see platform/argocd/bootstrap-chart/templates/
+# root-platform-app.yaml's comment) -- hence the second rule below,
+# `patch` scoped via resourceNames to exactly the Applications that step
+# needs to sync, not a blanket grant across every Application in the
+# cluster. get/list/watch stay unscoped (unchanged) since the same step
+# needs to discover which of these are OutOfSync before deciding what to
+# patch. resourceNames can't wildcard, so onboarding a new prod platform
+# component (a new gitops/prod/platform/*.yaml file) means adding its
+# Application name here too -- a deliberate trade-off: a compromised token
+# can only ever trigger a sync on a known, enumerated set of Applications,
+# never an arbitrary one. Still no exec, no secrets, no delete.
 #
 # No namespace set on any object -- applied into whatever this
 # Application's destination.namespace is (gitops/prod/platform/
@@ -32,6 +45,14 @@ rules:
   - apiGroups: ["argoproj.io"]
     resources: ["applications"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["patch"]
+    resourceNames:
+      - root-platform
+      - cert-manager-ca
+      - ci-argocd-reader
+      - gateway-hostname-route
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -4,13 +4,25 @@
 # environment's own gitops/{{ .Values.environment }}/platform holds only
 # what genuinely can't be shared.
 #
-# prod's platform source pins targetRevision: prod, not main -- prod's
-# promotion gate. main is where dev-track changes land (root.yaml above,
-# and dev's own copy of this Application, both still on main); a change
-# only reaches the prod branch once .github/workflows/promote-platform.yml
-# has verified every Application in dev's own argocd namespace (not just
-# the platform ones) is Synced+Healthy, and fast-forwards prod to that
-# commit automatically. dev tracks main directly on both sources.
+# Single branch, both environments: targetRevision is always main, never a
+# separate prod branch -- one source of truth, no branch-drift vector,
+# same model the app repos already use (their prod overlay differs from
+# dev's by one field -- an image tag -- not a separate branch). Checked
+# live before this change: gitops/dev/platform/*.yaml and gitops/prod/
+# platform/*.yaml were already near-identical, differing only in which
+# already-separate -dev/-prod config directory they point at -- the
+# branch was never differentiating *content* (the directory split already
+# did that), only gating *when* it applied.
+#
+# prod's promotion gate now lives in syncPolicy instead: dev keeps
+# automated (immediate self-heal, unchanged behavior). prod has NO
+# automated block at all -- Argo CD reflects OutOfSync instead of
+# silently applying whatever's newest on main, and only applies a change
+# once .github/workflows/promote-platform.yml explicitly triggers a sync
+# (kubectl patch application ... operation.sync), itself gated on every
+# Application in dev's own argocd namespace being Synced+Healthy first --
+# same health check as before, just a triggered sync instead of a branch
+# fast-forward as the actual gated action.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -22,17 +34,22 @@ spec:
   project: default
   sources:
     - repoURL: {{ .Values.githubRepoUrl | quote }}
-      targetRevision: {{ if eq .Values.environment "prod" }}prod{{ else }}main{{ end }}
+      targetRevision: main
       path: platform/gitops-platform-apps
     - repoURL: {{ .Values.githubRepoUrl | quote }}
-      targetRevision: {{ if eq .Values.environment "prod" }}prod{{ else }}main{{ end }}
+      targetRevision: main
       path: gitops/{{ .Values.environment }}/platform
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
+{{- if eq .Values.environment "prod" }}
+    syncOptions:
+      - CreateNamespace=true
+{{- else }}
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+{{- end }}
