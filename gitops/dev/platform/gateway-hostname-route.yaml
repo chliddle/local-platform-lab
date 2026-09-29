@@ -1,5 +1,9 @@
 # sync-wave 3: needs the Gateway (gateway-api-examples, wave 2) to already
 # exist -- an HTTPRoute's parentRef can't resolve otherwise.
+#
+# Trivial touch to exercise the new single-branch/triggered-sync
+# promotion end to end (see gitops/prod/platform/gateway-hostname-route.yaml
+# and promote-platform.yml) -- no behavior change.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
