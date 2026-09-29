@@ -1258,9 +1258,49 @@ no Istio needed since blue-green is inherently binary), and
 traffic routing** -- confirmed via Argo Rollouts' own docs to be built
 into the controller itself, no plugin, unlike the newer Gateway API
 integration -- tied to a Prometheus `AnalysisTemplate` with automated
-abort/rollback). prod deliberately stays unconverted for now: validate
-the winning pattern in dev's comparison sandbox before committing prod's
-real traffic to it.
+abort/rollback). prod stays unconverted: validate the winning pattern in
+dev's comparison sandbox before committing prod's real traffic to it.
+
+**Tried converting prod to canary (with its own minimal, scoped
+Prometheus for the AnalysisTemplate) and reverted it, live, the same
+session -- a real hardware ceiling, not a design flaw in the pattern
+itself.** `platform/rollouts/dev/analysistemplate.yaml`'s own comment
+already flagged the reason this hadn't been done: prod has no Prometheus,
+a decision `gitops/dev/platform/kube-prometheus-stack.yaml` documents as
+already crash-tested once (duplicating the FULL stack onto prod caused
+real swap exhaustion and control-plane crash-loops). Before building
+anything, current real usage was checked live via `docker stats`: both
+Kind clusters combined were using 5.85GiB of the shared 7.65GiB Docker
+Desktop VM, leaving ~1.8GiB free -- comfortably more than a *minimal*
+stack's estimated worst case (Prometheus + its operator + an OTel
+Collector agent only, no Grafana/Alertmanager/kube-state-metrics/
+node-exporter: 500m CPU / 896Mi at limits). That steady-state math was
+correct. What it missed: the Docker Desktop VM doesn't get dedicated
+physical cores -- it shares the Mac's 14 logical cores with every other
+process on the machine (browsers, IDEs, Docker Desktop's own overhead),
+and the *install-time* reconcile burst (istiod recomputing mesh config
+for a new Gateway/VirtualService/DestinationRule, the Prometheus Operator
+reconciling for the first time, a new OTel Collector DaemonSet starting)
+pushed the host's own load average to 18 on a 14-core machine, live,
+climbing rather than settling over several consecutive checks, with
+`kube-prometheus-stack-operator` visibly crash-looping (6 restarts in
+under 2 minutes) under the contention. Reverted immediately (a normal
+`git revert` on both the platform repo and `template-test-1`, not a
+force-push or history rewrite) once that trend was confirmed live rather
+than assumed transient; host load average returned to under 9 within two
+minutes of the revert actually taking effect (Argo CD's own sync cycle
+was too slow to wait on -- the Applications were deleted directly to
+force immediate cleanup).
+
+The takeaway isn't "canary-in-prod is unsafe" -- it's that this
+specific constraint (one Mac's Docker Desktop VM hosting two full
+Kubernetes clusters, competing for the same physical cores as every other
+app the machine happens to be running) is a lab-scale artifact. A real
+production deployment gives dedicated nodes to prod, not a slice of a
+shared VM also running dev and the operator's entire desktop -- the
+install-time reconcile burst that caused the contention here wouldn't
+compete with anything on a real node. Revisit if/when this project ever
+runs on dedicated infrastructure instead of a single shared laptop VM.
 
 A dedicated Istio ingress proxy
 (`gitops/dev/platform/istio-ingressgateway-rollouts.yaml`) fronts the
