@@ -1,0 +1,23 @@
+# Mirrors platform/rollouts/dev/gateway.yaml exactly. Classic Istio
+# Gateway (networking.istio.io/v1, NOT the Gateway API kind) -- selects
+# the dedicated proxy deployed by
+# gitops/prod/platform/istio-ingressgateway-rollouts.yaml by its pod
+# labels. See gitops/dev/platform/istio-ingressgateway-rollouts.yaml's
+# comment for why this needs its own proxy rather than reusing prod's
+# shared Gateway API gateway (a classic VirtualService's `gateways` field
+# can't attach to a Gateway API-provisioned proxy -- confirmed live).
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: template-test-1-canary
+  namespace: template-test-1
+spec:
+  selector:
+    istio: ingressgateway-rollouts
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"

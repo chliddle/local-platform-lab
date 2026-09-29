@@ -28,13 +28,17 @@
 # a small enough diff to stay under the size limits; kube-prometheus-stack
 # never tries at all (crds.enabled: false on that Application).
 #
-# ARC and kube-prometheus-stack are dev only: both live on dev, not prod
-# -- confirmed live that duplicating the observability stack onto prod
-# doesn't fit in this VM's 7.65GiB alongside everything else both clusters
-# already run (see gitops/dev/platform/kube-prometheus-stack.yaml's
-# comment). Argo Rollouts runs on BOTH dev and prod (Milestone 6 -- the
-# dev->prod promotion pattern needs the same Rollout CRDs/controller on
-# both), so its CRD step below is NOT gated behind the dev-only check.
+# ARC is dev only (the self-hosted runner only ever lived on dev -- see
+# CLAUDE.md's GitHub Actions Runners section). kube-prometheus-stack now
+# runs on BOTH dev and prod: prod's canary conversion needs its own
+# scoped Prometheus for the AnalysisTemplate (gitops/prod/platform/
+# kube-prometheus-stack.yaml -- deliberately minimal, not the full stack
+# that was previously confirmed not to fit duplicated on this VM; see
+# that file's own comment for the resource numbers this was re-checked
+# against before adding it here too). Argo Rollouts also runs on BOTH
+# (Milestone 6 -- the dev->prod promotion pattern needs the same Rollout
+# CRDs/controller on both), so its CRD step below was never gated behind
+# the dev-only check either.
 #
 # Idempotent (server-side apply) -- safe to re-run.
 #
@@ -82,11 +86,6 @@ helm template argo-rollouts --repo https://argoproj.github.io/argo-helm \
 echo "==> Server-side applying Argo Rollouts' CRDs"
 KUBECONFIG="$kubeconfig" kubectl apply --server-side -f "${work_dir}/rollouts-crds.yaml"
 
-if [ "$env_name" != "dev" ]; then
-  echo "==> ${env_name} runs neither ARC nor the observability stack -- nothing further to pre-apply."
-  exit 0
-fi
-
 echo "==> Pulling kube-prometheus-stack chart 91.5.0 for its CRDs"
 helm pull kube-prometheus-stack --repo https://prometheus-community.github.io/helm-charts \
   --version 91.5.0 --untar -d "${work_dir}/kps" >/dev/null
@@ -95,6 +94,11 @@ echo "==> Server-side applying kube-prometheus-stack's CRDs"
 for f in "${work_dir}"/kps/kube-prometheus-stack/charts/crds/crds/*.yaml; do
   KUBECONFIG="$kubeconfig" kubectl apply --server-side -f "$f"
 done
+
+if [ "$env_name" != "dev" ]; then
+  echo "==> ${env_name} doesn't run ARC -- nothing further to pre-apply."
+  exit 0
+fi
 
 echo "==> Pulling ARC controller chart 0.14.2 for its CRDs"
 helm pull oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \

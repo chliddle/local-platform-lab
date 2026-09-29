@@ -1,0 +1,18 @@
+# Mirrors platform/rollouts/dev/destinationrule.yaml exactly, scoped to
+# prod's own namespace. Empty subset label selectors -- Argo Rollouts'
+# controller patches rollouts-pod-template-hash into
+# spec.subsets[].labels automatically as it manages the canary. Name/
+# canarySubsetName/stableSubsetName must match
+# deploy/overlays/prod/rollout.yaml in template-test-1 exactly.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: template-test-1
+  namespace: template-test-1
+spec:
+  host: template-test-1.template-test-1.svc.cluster.local
+  subsets:
+    - name: stable
+      labels: {}
+    - name: canary
+      labels: {}

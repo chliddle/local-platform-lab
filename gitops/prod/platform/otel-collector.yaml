@@ -1,0 +1,107 @@
+# Mirrors gitops/dev/platform/otel-collector.yaml exactly (same chart,
+# version, resources, presets, scrape config) -- needed so prod's own
+# canary AnalysisTemplate has real http_requests_total data to query, the
+# same way dev's canary does. See dev's copy of this file for the full
+# reasoning on every individual value below -- unchanged here, not
+# re-derived. Feeds prod's own local Prometheus
+# (gitops/prod/platform/kube-prometheus-stack.yaml) -- no cross-cluster
+# push, same as dev.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: "0.173.1"
+    helm:
+      releaseName: otel-collector
+      valuesObject:
+        mode: daemonset
+        fullnameOverride: otel-collector
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 150m
+            memory: 256Mi
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 6
+        readinessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 6
+        presets:
+          kubernetesAttributes:
+            enabled: true
+          hostMetrics:
+            enabled: true
+          clusterMetrics:
+            enabled: true
+        config:
+          receivers:
+            prometheus:
+              config:
+                scrape_configs:
+                  - job_name: opentelemetry-collector
+                    scrape_interval: 60s
+                    static_configs:
+                      - targets: ["${env:MY_POD_IP}:8888"]
+                  - job_name: kubernetes-pods
+                    scrape_interval: 30s
+                    kubernetes_sd_configs:
+                      - role: pod
+                    relabel_configs:
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                        action: keep
+                        regex: "true"
+                      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                        action: replace
+                        target_label: __metrics_path__
+                        regex: (.+)
+                      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                        action: replace
+                        regex: ([^:]+)(?::\d+)?;(\d+)
+                        replacement: $1:$2
+                        target_label: __address__
+                      - action: labelmap
+                        regex: __meta_kubernetes_pod_label_(.+)
+                      - source_labels: [__meta_kubernetes_pod_name]
+                        target_label: pod
+                      - source_labels: [__meta_kubernetes_namespace]
+                        target_label: namespace
+          exporters:
+            debug: {}
+            otlphttp/prometheus:
+              endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              metrics:
+                exporters:
+                  - debug
+                  - otlphttp/prometheus
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
