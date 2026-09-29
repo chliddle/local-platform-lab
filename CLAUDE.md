@@ -1258,40 +1258,9 @@ no Istio needed since blue-green is inherently binary), and
 traffic routing** -- confirmed via Argo Rollouts' own docs to be built
 into the controller itself, no plugin, unlike the newer Gateway API
 integration -- tied to a Prometheus `AnalysisTemplate` with automated
-abort/rollback). prod stayed unconverted through the rest of Milestone 6,
-deliberately: validate the winning pattern in dev's comparison sandbox
-before committing prod's real traffic to it.
-
-**Update, after the CI/CD promotion-gate work (below): prod is now
-converted to canary too**, the same pattern dev's own live comparison
-showed was the only one of the three with automated protection
-(`simulate-bad-rollout.sh`: rolling has none, blue-green just parks the
-bad build in preview, canary measures the real error rate and rolls
-itself back). `deploy/overlays/prod/` in `template-test-1` mirrors
-`deploy/overlays/dev-canary/` (self-contained `rollout.yaml`+
-`service.yaml`, no `../../base`), with `platform/rollouts/prod/` and
-`gitops/prod/platform/{rollouts-routing,istio-ingressgateway-rollouts}.yaml`
-mirroring dev's own canary routing.
-
-The one real blocker -- `platform/rollouts/dev/analysistemplate.yaml`'s
-own comment documented it before this was built: prod had no Prometheus,
-so a prod canary couldn't get automated analysis -- was re-litigated
-live, not just re-decided. `gitops/dev/platform/kube-prometheus-stack.yaml`'s
-comment records a real prior crash from duplicating the FULL stack onto
-prod (sustained swap exhaustion, control-plane crash-loops on the shared
-7.65GiB/14-CPU Docker Desktop VM). Checked live before adding anything
-this time: both Kind clusters combined were using 5.85GiB of 7.65GiB,
-~1.8GiB free. `gitops/prod/platform/kube-prometheus-stack.yaml` is
-deliberately **minimal** -- Prometheus + its operator only, `grafana.
-enabled: false` and `alertmanager.enabled: false` (removed entirely, not
-just resource-limited), no blackbox-exporter, no dashboards -- costing
-200m CPU/448Mi at requests, 500m CPU/896Mi at worst-case limits, comfortably
-inside the measured headroom. This is a scoped metrics backend for the
-canary AnalysisTemplate's own query, not observability parity with dev
-(see Observability's own note, below). `scripts/pre-apply-large-crds.sh`
-was extended to pre-apply kube-prometheus-stack's CRDs for prod too, not
-just dev, for the same etcd request-size-limit reason dev already needed
-it.
+abort/rollback). prod deliberately stays unconverted for now: validate
+the winning pattern in dev's comparison sandbox before committing prod's
+real traffic to it.
 
 A dedicated Istio ingress proxy
 (`gitops/dev/platform/istio-ingressgateway-rollouts.yaml`) fronts the
@@ -1345,19 +1314,11 @@ Dashboard (below) and Observability's Dashboards paragraph.
   dedicated management cluster (the original plan) and not duplicated onto
   prod either (tried, then reverted). gitops/dev/platform/otel-collector.yaml
   fans out locally to that same cluster's own Prometheus, no
-  cross-cluster push. **prod had no observability coverage** as a direct
-  consequence of that -- an accepted gap for a single-laptop lab, not
-  something a real multi-node deployment would need to accept (separate
-  nodes per cluster removes the shared-VM memory ceiling this tradeoff is
-  actually about).
-  **Update (Milestone 6's prod canary conversion, above): prod now runs a
-  deliberately minimal Prometheus + OTel Collector, scoped only to what
-  the canary AnalysisTemplate's own query needs.** No Grafana, no
-  Alertmanager, no Blackbox Exporter, no dashboards on prod -- this is not
-  the "prod has no observability coverage" gap being closed, it's a
-  narrower, different-purpose addition (an automated deployment-safety
-  signal, not general-purpose monitoring). Full prod observability parity
-  with dev remains a separate, still-open decision.
+  cross-cluster push. **prod has no observability coverage** as a direct
+  consequence -- an accepted gap for a single-laptop lab, not something a
+  real multi-node deployment would need to accept (separate nodes per
+  cluster removes the shared-VM memory ceiling this tradeoff is actually
+  about)
 * [ ] Loki, Tempo -- built, then deliberately dropped (Milestone 5's
   redesign note): even dev-only, the full stack kept this VM under real,
   sustained pressure (control-plane liveness failures on prod, all cores
