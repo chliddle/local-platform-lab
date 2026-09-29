@@ -515,9 +515,21 @@ ConfigMaps labeled `grafana_dashboard: "1"`, auto-imported by
 kube-prometheus-stack's Grafana sidecar -- no Grafana API/provisioning
 step). `app-http-metrics.json` breaks success/error rate and latency down
 by `pod`, not just aggregated -- deliberately, so a canary/A-B/dark-launch
-variant (Milestone 6, Argo Rollouts) shows up as its own line the moment
-it exists as a separate pod behind the same Service, with zero dashboard
-changes needed when that milestone lands.
+variant shows up as its own line the moment it exists as a separate pod
+behind the same Service; confirmed exactly that happened with zero
+dashboard-mechanism changes needed once Milestone 6 actually landed.
+`progressive-delivery.json` (Milestone 6) is the dedicated deployment-
+strategy comparison view -- see that milestone's own note and the
+Progressive Delivery Dashboard section, below.
+
+Both this and `synthetic-monitoring.json` briefly went stale
+(Milestone 6, Phase 3): each hardcoded the single `template-test-1`
+namespace/blackbox job name, which stopped existing on dev the moment it
+split into three variant namespaces -- confirmed live both were silently
+returning zero data on dev for a while before this was caught and fixed
+(both now match all three variants via a regex). A reminder that a
+dashboard's queries are a real, breakable dependency on naming, not just
+a one-time provisioning concern.
 
 ---
 
@@ -525,16 +537,20 @@ changes needed when that milestone lands.
 
 Use Blackbox Exporter and/or dedicated synthetic test jobs to continuously test applications.
 
-**Current status: deployed (dev only).** Blackbox Exporter probes the real
-`https://template-test-1.dev.platform.local` endpoint -- full TLS chain
-validation, no `-k`/`insecure_skip_verify` (see Observability, above, for
-why dev only). Its target hostname is still hardcoded per-app in
-`gitops/dev/platform/blackbox-exporter.yaml` and
-`scripts/sync-monitoring-targets.sh` -- unlike metrics scraping, this
-hasn't been generalized to auto-discover every onboarded app yet (would
-need enumerating HTTPRoutes or a similar declarative source of "what
-hostnames exist"); revisit once a second onboarded app makes it worth
-building against.
+**Current status: deployed (dev only), one probe per deployment-strategy
+variant (Milestone 6).** Blackbox Exporter runs three independent probes
+-- `template-test-1-{rolling,bluegreen,canary}`, written by
+`scripts/sync-monitoring-targets.sh` with a `variant` label so
+`platform/grafana-dashboards/synthetic-monitoring.json` can tell them
+apart. Rolling/blue-green go through the shared Gateway (HTTPS, full TLS
+chain validation, no `-k`/`insecure_skip_verify`); canary goes through its
+own dedicated HTTP-only Istio gateway (`gitops/dev/platform/
+istio-ingressgateway-rollouts.yaml` -- see Milestone 6's note for why
+canary needed a separate proxy at all), so that one probe validates HTTP
+success but not TLS. Target hostnames/IPs are still hardcoded per-variant
+in the sync script rather than auto-discovered from HTTPRoutes/Gateways
+generically; revisit once a second onboarded app makes that worth
+building.
 
 Validate:
 
@@ -564,6 +580,19 @@ Create Grafana dashboards showing:
 * synthetic probe results
 
 The goal is to visually observe a rollout succeed or fail.
+
+**Current status: done (Milestone 6).**
+`platform/grafana-dashboards/progressive-delivery.json` -- every panel
+split by namespace (`template-test-1-{rolling,bluegreen,canary}`) so all
+three deployment strategies are directly comparable side by side: request
+rate, HTTP 2xx/5xx, p95 latency, a *measured* canary traffic split (real
+observed request share per `rollouts-pod-template-hash`, not just the
+configured `setWeight` -- confirms Istio is actually routing the split),
+rollout phase per variant (stable/canary version is implicit in which
+namespace's line moves), updated/desired replicas as a pod-health proxy,
+and synthetic probe results. Drive a live rollout succeeding or failing
+with `scripts/simulate-bad-rollout.sh` -- confirmed live, repeatedly,
+watching this exact dashboard.
 
 ---
 
@@ -1206,10 +1235,76 @@ architecture decision reversed mid-milestone:**
 
 ## Milestone 6
 
-* Argo Rollouts
-* canary
-* blue/green
-* automated rollback
+* [x] Argo Rollouts
+* [x] canary
+* [x] blue/green
+* [x] automated rollback
+
+**Done, and expanded beyond the original checklist.** The user's own
+framing for this milestone -- "deploy template-test-1 using each of the
+deployment patterns in parallel, deploy broken code... to see how each
+deployment pattern performs against one another" -- pulled forward
+Milestone 9's "A/B testing, failure simulation, comparison of deployment
+strategies" scope too (same move already made once, pulling Milestone 7's
+observability into Milestone 5). See that milestone's own note.
+
+`template-test-1` runs three deployment strategies in parallel on dev,
+each its own namespace: `template-test-1-rolling` (plain
+`apps/v1 Deployment`, the control group -- today's pre-Milestone-6
+behavior, unmodified), `template-test-1-bluegreen` (Argo Rollouts
+blue-green, manual promotion gate via `activeService`/`previewService`,
+no Istio needed since blue-green is inherently binary), and
+`template-test-1-canary` (Argo Rollouts canary with **native Istio
+traffic routing** -- confirmed via Argo Rollouts' own docs to be built
+into the controller itself, no plugin, unlike the newer Gateway API
+integration -- tied to a Prometheus `AnalysisTemplate` with automated
+abort/rollback). prod deliberately stays unconverted for now: validate
+the winning pattern in dev's comparison sandbox before committing prod's
+real traffic to it.
+
+A dedicated Istio ingress proxy
+(`gitops/dev/platform/istio-ingressgateway-rollouts.yaml`) fronts the
+canary variant specifically -- confirmed live a classic Istio
+`VirtualService` cannot attach to a Gateway API `Gateway`'s
+auto-provisioned proxy (accepted by the API, pushed by istiod with no
+error, but never actually appeared in that proxy's route config), so
+canary traffic gets its own proxy via Istio's `gateway` Helm chart
+instead. This also finally delivers the "comparison between Gateway API
+and Istio-native routing" goal (Local Routing section): rolling/blue-green
+route through the shared Gateway API `demo-gateway`, canary routes
+through this dedicated Istio-native one -- two real, physically separate
+ingress paths, not just two YAML shapes describing the same proxy.
+
+App-side: `internal/middleware/fault.go` (both the app-template and
+template-test-1 repos) injects a synthetic HTTP-response-level failure at
+a configurable rate (`FAULT_ERROR_RATE`), deliberately leaving
+`/health`/`/ready` untouched -- simulates a bad deploy that passes every
+health check but breaks real traffic, precisely the class of bug canary
+analysis/blue-green manual gates exist to catch. `scripts/simulate-bad-
+rollout.sh` pushes the same fault to all three variants at once (a pure
+GitOps config change, no rebuild) and generates real in-cluster traffic
+against all three so the comparison is actually visible live, not just
+configured -- confirmed live, repeatedly: rolling's error rate jumps
+immediately and stays broken (no protection); blue-green's bad build sits
+in preview and never reaches active traffic; canary's own `AnalysisTemplate`
+measures the real elevated error rate and aborts/rolls back automatically,
+with zero human intervention.
+
+Two real bugs found and fixed via that live verification, not just
+config review: the `AnalysisTemplate`'s first measurement(s) fired before
+the canary pod had two real OTel Collector scrapes yet, so `rate()`
+returned genuinely empty and Argo Rollouts treated that as an *error*
+rather than a measurement -- fixed with `initialDelay: 60s`. Separately,
+the canary's own step pauses (30s) were shorter than the analysis needed
+to accumulate enough failed measurements to abort (`initialDelay` 60s +
+2 x `interval` 30s = 120s minimum) -- the rollout was auto-promoting to
+100% before its own safety net could fire. Fixed by extending the first
+pause to 150s. "Automated rollback" only counts if the safety net
+actually has time to catch the failure before the rollout outruns it.
+
+See also: Local Load Balancing (MetalLB dropped in favor of Istio-native
+NodePort exposure, a Milestone 6 prerequisite), Progressive Delivery
+Dashboard (below) and Observability's Dashboards paragraph.
 
 ## Milestone 7
 
@@ -1237,10 +1332,9 @@ architecture decision reversed mid-milestone:**
   cleanly against stable -- built ahead of Milestone 6 existing, since the
   scrape/dashboard mechanism doesn't depend on Rollouts itself, only on a
   second ReplicaSet's pods showing up with their own `pod` label
-* rollout-strategy dashboards (traffic-split %, canary vs. stable
-  side-by-side) -- still pending, needs Milestone 6's Argo Rollouts to
-  exist first for there to be a strategy to chart, but the underlying
-  per-pod metrics breakdown is already in place
+* [x] rollout-strategy dashboards (traffic-split %, canary vs. stable
+  side-by-side) -- `platform/grafana-dashboards/progressive-delivery.json`,
+  Milestone 6
 
 ## Milestone 8
 
@@ -1252,8 +1346,17 @@ architecture decision reversed mid-milestone:**
 
 ## Milestone 9
 
-* A/B testing
-* dark launches
-* failure simulation
-* comparison of deployment strategies
-* documentation of trade-offs
+* [x] A/B testing -- three deployment strategies compared side by side,
+  Milestone 6
+* [ ] dark launches -- not yet; the current comparison is strategy-vs-
+  strategy on the same code path, not a separate dark-launched feature
+  behind a flag
+* [x] failure simulation -- `FAULT_ERROR_RATE`, Milestone 6
+* [x] comparison of deployment strategies -- pulled forward into
+  Milestone 6, see that milestone's own note for the full account
+  (`scripts/simulate-bad-rollout.sh`, `platform/grafana-dashboards/
+  progressive-delivery.json`)
+* [ ] documentation of trade-offs -- the live comparison itself and
+  Milestone 6's note document *what happened*; a dedicated trade-offs
+  write-up (when to actually pick canary vs. blue-green vs. plain rolling
+  for a real system) is still open
